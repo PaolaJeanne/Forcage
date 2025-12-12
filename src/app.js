@@ -6,6 +6,8 @@ const config = require('./config/env');
 const logger = require('./utils/logger');
 const errorHandler = require('./middleware/errorHandler');
 const connectDB = require('./config/database');
+const demandeForçageRoutes = require('./routes/demandeForçage.routes');
+
 
 const app = express();
 
@@ -65,8 +67,9 @@ app.get('/health', (req, res) => {
 // Routes API (à venir)
 // ==========================================
 app.use('/api/v1/auth', require('./routes/auth.routes'));
-// app.use('/api/v1/demandes', require('./routes/demande.routes'));
+app.use('/api/v1/demandes', require('./routes/demandeForçage.routes'));
 // app.use('/api/v1/documents', require('./routes/document.routes'));
+
 
 // ==========================================
 // Gestion des erreurs 404

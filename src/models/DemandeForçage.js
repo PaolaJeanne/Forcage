@@ -1,100 +1,151 @@
+// ============================================
+// 1. MODEL - models/DemandeForçage.js
+// ============================================
 const mongoose = require('mongoose');
 
 const demandeForçageSchema = new mongoose.Schema({
-  client: {
+  // Identification
+  numeroReference: {
+    type: String,
+    unique: true,
+    required: true,
+    default: () => `DF-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+  },
+  
+  // Client
+  clientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-  numeroCompte: {
+  compteNumero: {
     type: String,
-    required: [true, 'Le numéro de compte est requis'],
-    trim: true
+    required: true
   },
+  
+  // Détails de l'opération
   typeOperation: {
     type: String,
-    enum: ['virement', 'prelevement', 'cheque', 'carte', 'autre'],
-    required: [true, 'Le type d\'opération est requis']
+    enum: ['VIREMENT', 'PRELEVEMENT', 'CHEQUE', 'CARTE', 'RETRAIT', 'AUTRE'],
+    required: true
   },
   montant: {
     type: Number,
-    required: [true, 'Le montant est requis'],
-    min: [0, 'Le montant doit être positif']
+    required: true,
+    min: 0
   },
   motif: {
     type: String,
-    required: [true, 'Le motif est requis'],
+    required: true,
     minlength: 10,
     maxlength: 500
   },
+  
+  // Informations complémentaires
+  soldeActuel: Number,
+  decouvertAutorise: Number,
+  montantForçageTotal: Number, // Montant total en dépassement
+  
+  // Statut et workflow
   statut: {
     type: String,
-    enum: ['en_attente', 'en_etude', 'en_validation', 'validee', 'refusee'],
-    default: 'en_attente'
+    enum: ['BROUILLON', 'ENVOYEE', 'EN_ETUDE', 'EN_VALIDATION', 'VALIDEE', 'REFUSEE', 'ANNULEE'],
+    default: 'BROUILLON'
   },
-  montantAutorise: {
-    type: Number,
-    default: 0
-  },
-  dateLimiteRegularisation: {
-    type: Date
-  },
-  documentsJoints: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Document'
-  }],
-  historique: [{
-    statut: String,
-    commentaire: String,
-    traitePar: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    date: {
-      type: Date,
-      default: Date.now
-    }
-  }],
-  conseillerAssigne: {
+  
+  // Traitement
+  conseillerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
-  niveauRisque: {
+  responsableId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  dateTraitement: Date,
+  commentaireTraitement: String,
+  
+  // Décision
+  montantAutorise: Number,
+  dateEcheance: Date, // J+15 par défaut
+  conditionsParticulieres: String,
+  
+  // Pièces justificatives
+  piecesJustificatives: [{
+    nom: String,
+    url: String,
     type: String,
-    enum: ['faible', 'moyen', 'eleve'],
-    default: 'moyen'
-  },
-  kycValide: {
+    taille: Number,
+    uploadedAt: { type: Date, default: Date.now }
+  }],
+  
+  // Régularisation
+  dateRegularisation: Date,
+  regularisee: {
     type: Boolean,
     default: false
   },
-  regularise: {
-    type: Boolean,
-    default: false
+  
+  // Scoring et risque
+  scoreRisque: {
+    type: String,
+    enum: ['FAIBLE', 'MOYEN', 'ELEVE', 'CRITIQUE'],
+    default: 'MOYEN'
   },
-  dateRegularisation: {
-    type: Date
+  notationClient: String,
+  
+  // Historique des actions
+  historique: [{
+    action: String,
+    statutAvant: String,
+    statutApres: String,
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    commentaire: String,
+    timestamp: { type: Date, default: Date.now }
+  }],
+  
+  // Métadonnées
+  agenceId: String,
+  priorite: {
+    type: String,
+    enum: ['NORMALE', 'URGENTE'],
+    default: 'NORMALE'
   }
+  
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Index pour améliorer les performances
-demandeForçageSchema.index({ client: 1, statut: 1 });
-demandeForçageSchema.index({ conseillerAssigne: 1 });
+// Indexes pour performance
+demandeForçageSchema.index({ clientId: 1, statut: 1 });
+demandeForçageSchema.index({ conseillerId: 1, statut: 1 });
+demandeForçageSchema.index({ numeroReference: 1 });
 demandeForçageSchema.index({ createdAt: -1 });
 
-// Méthode pour ajouter une entrée à l'historique
-demandeForçageSchema.methods.ajouterHistorique = function(statut, commentaire, userId) {
+// Virtual pour vérifier si en retard
+demandeForçageSchema.virtual('enRetard').get(function() {
+  if (this.statut === 'VALIDEE' && this.dateEcheance && !this.regularisee) {
+    return new Date() > this.dateEcheance;
+  }
+  return false;
+});
+
+// Méthode pour ajouter une action à l'historique
+demandeForçageSchema.methods.ajouterHistorique = function(action, userId, commentaire = '') {
   this.historique.push({
-    statut,
-    commentaire,
-    traitePar: userId,
-    date: new Date()
+    action,
+    statutAvant: this.statut,
+    statutApres: this.statut,
+    userId,
+    commentaire
   });
-  this.statut = statut;
 };
 
-const DemandeForçage = mongoose.model('DemandeForçage', demandeForçageSchema);
 
-module.exports = DemandeForçage;
+
+module.exports =
+  mongoose.models.DemandeForçage ||
+  mongoose.model("DemandeForçage", demandeForçageSchema);
+
