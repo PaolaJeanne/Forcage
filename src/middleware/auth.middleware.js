@@ -1,15 +1,16 @@
-// middleware/auth.middleware.js
+// ============================================
+// 4. MIDDLEWARE - src/middleware/auth.middleware.js
+// ============================================
 const { verifyToken } = require('../utils/jwt.util');
 const { errorResponse } = require('../utils/response.util');
-const { User } = require('../models');
+const User = require('../models/User');
 
 const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('Token manquant ou invalide'); // Ajoute ce log pour vérifier
-      return errorResponse(res, 401, "Token d'authentification manquant");
+      return errorResponse(res, 401, 'Token manquant');
     }
     
     const token = authHeader.substring(7);
@@ -18,37 +19,75 @@ const authenticate = async (req, res, next) => {
     const user = await User.findById(decoded.userId);
     
     if (!user || !user.isActive) {
-      console.log('Utilisateur non trouvé ou inactif'); // Ajoute ce log aussi
       return errorResponse(res, 401, 'Utilisateur non trouvé ou inactif');
     }
     
-    req.user = user;
     req.userId = user._id;
+    req.userRole = user.role;
+    req.user = user;
     
-    return next();
+    next();
   } catch (error) {
-    console.log('Erreur de token', error); // Et encore un log ici
     return errorResponse(res, 401, 'Token invalide ou expiré');
   }
 };
 
-// middleware/auth.middleware.js
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!req.user) {
+    if (!req.userRole) {
       return errorResponse(res, 401, 'Non authentifié');
     }
     
-    if (!roles.includes(req.user.role)) {
-      return errorResponse(res, 403, 'Accès refusé: permissions insuffisantes');
+    if (roles.length && !roles.includes(req.userRole)) {
+      return errorResponse(res, 403, 'Accès refusé - Rôle insuffisant');
     }
     
-    return next(); // Si l'utilisateur est authentifié et autorisé, on passe au middleware suivant
+    next();
   };
 };
 
+const canAuthorize = (req, res, next) => {
+  const montant = req.body.montant || req.body.montantAutorise;
+  
+  if (!montant) {
+    return errorResponse(res, 400, 'Montant requis');
+  }
+  
+  if (!req.user.peutAutoriser(montant)) {
+    return errorResponse(
+      res, 
+      403, 
+      `Montant dépasse votre limite d'autorisation (${req.user.limiteAutorisation} FCFA)`
+    );
+  }
+  
+  next();
+};
+
+const sameAgency = async (req, res, next) => {
+  if (['admin', 'dga', 'risques'].includes(req.userRole)) {
+    return next();
+  }
+  
+  const demandeId = req.params.id;
+  const DemandeForçage = require('../models/DemandeForçage');
+  
+  const demande = await DemandeForçage.findById(demandeId).populate('client');
+  
+  if (!demande) {
+    return errorResponse(res, 404, 'Demande introuvable');
+  }
+  
+  if (req.user.agence !== demande.client.agence) {
+    return errorResponse(res, 403, 'Accès refusé - Agence différente');
+  }
+  
+  next();
+};
 
 module.exports = {
   authenticate,
-  authorize
+  authorize,
+  canAuthorize,
+  sameAgency
 };
