@@ -5,11 +5,7 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-      "clean-admin": "node src/scripts/createCleanAdmin.js",
-    "reset-passwords": "node src/scripts/resetAllPasswords.js",
-    "test-bcrypt": "node src/scripts/testBcrypt.js",
-    "verify-bcrypt": "node src/scripts/verifyBcryptjs.js",
-    "test-login": "curl -X POST http://localhost:3000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@bank.cm\",\"password\":\"Admin123!@#\"}'"
+      "clean-admin": "node src/scripts/createCleanAdmin.js"
   },
   "keywords": [
     "express",

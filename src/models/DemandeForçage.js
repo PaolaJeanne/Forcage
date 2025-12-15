@@ -7,11 +7,11 @@ const demandeForçageSchema = new mongoose.Schema({
   // Identification
   numeroReference: {
     type: String,
-    unique: true,
     required: true,
-    default: () => `DF-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+    unique: true,
+    index: true  // Gardez cette ligne
   },
-  
+    
   // Client
   clientId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -121,7 +121,7 @@ const demandeForçageSchema = new mongoose.Schema({
 // Indexes pour performance
 demandeForçageSchema.index({ clientId: 1, statut: 1 });
 demandeForçageSchema.index({ conseillerId: 1, statut: 1 });
-demandeForçageSchema.index({ numeroReference: 1 });
+//demandeForçageSchema.index({ numeroReference: 1 });
 demandeForçageSchema.index({ createdAt: -1 });
 
 // Virtual pour vérifier si en retard
@@ -142,8 +142,6 @@ demandeForçageSchema.methods.ajouterHistorique = function(action, userId, comme
     commentaire
   });
 };
-
-
 
 module.exports =
   mongoose.models.DemandeForçage ||

@@ -16,13 +16,14 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
   email: {
-    type: String,
-    required: [true, 'L\'email est requis'],
-    unique: true,
-    lowercase: true,
-    trim: true,
-    match: [/^\S+@\S+\.\S+$/, 'Email invalide']
-  },
+  type: String,
+  required: [true, 'L\'email est requis'],
+  unique: true,      // Unique déjà présent
+  lowercase: true,
+  trim: true,
+  index: true       // Conservez cette ligne
+},
+
   password: {
     type: String,
     required: [true, 'Le mot de passe est requis'],
@@ -60,13 +61,13 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
   numeroCompte: {
-    type: String,
-    trim: true,
-    uppercase: true,
-    unique: true,
-    sparse: true,
-    required: function() { return this.role === 'client'; }
-  },
+  type: String,
+  unique: true,     // Unique déjà présent
+  sparse: true,     // Sparse déjà présent
+  uppercase: true,
+  trim: true,
+  index: true       // Conservez cette ligne
+},
   agence: {
     type: String,
     trim: true,
@@ -140,9 +141,9 @@ const userSchema = new mongoose.Schema({
 // ============================================
 // INDEXES
 // ============================================
-userSchema.index({ email: 1 }, { unique: true });
+//userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ role: 1, agence: 1 });
-userSchema.index({ numeroCompte: 1 }, { unique: true, sparse: true });
+//userSchema.index({ numeroCompte: 1 }, { unique: true, sparse: true });
 userSchema.index({ isActive: 1 });
 userSchema.index({ createdAt: -1 });
 
