@@ -1,6 +1,5 @@
-
 // ============================================
-// 5. CONTROLLER AUTH SÉCURISÉ - src/controllers/auth.controller.js
+// CONTROLLER AUTH OPTIMISÉ - src/controllers/auth.controller.js
 // ============================================
 const User = require('../models/User');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt.util');
@@ -45,15 +44,28 @@ const register = async (req, res) => {
     
     logger.info(`Nouvel utilisateur: ${email} (role: client)`);
     
+    // OPTIMISATION: Générer token avec plus d'infos
     const token = generateToken({ 
       userId: user._id, 
       email: user.email, 
-      role: user.role 
+      role: user.role,
+      nom: user.nom,
+      prenom: user.prenom
     });
+    
     const refreshToken = generateRefreshToken({ userId: user._id });
     
+    // OPTIMISATION: Réponse légère - seulement l'essentiel
     return successResponse(res, 201, 'Inscription réussie', {
-      user: user.toJSON(),
+      user: {
+        id: user._id,
+        email: user.email,
+        nom: user.nom,
+        prenom: user.prenom,
+        role: user.role,
+        telephone: user.telephone,
+        numeroCompte: user.numeroCompte
+      },
       token,
       refreshToken
     });
@@ -65,86 +77,71 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-  console.log('🔍 ===== DEBUG LOGIN START =====');
-  
   try {
     const { email, password } = req.body;
     
-    console.log('📨 Request body received:', req.body);
-    console.log('📧 Email extracted:', email);
-    console.log('🔑 Password extracted:', password ? '***PRESENT***' : 'MISSING');
-    
     if (!email || !password) {
-      console.log('❌ Missing email or password');
       return errorResponse(res, 400, 'Email et mot de passe requis');
     }
     
-    console.log('🔍 Searching for user...');
-    
-    // Get user WITH password
+    // OPTIMISATION: Utiliser la méthode statique du modèle
     const user = await User.findByEmailWithPassword(email);
     
-    console.log('📋 User found:', user ? 'YES' : 'NO');
-    
     if (!user) {
-      console.log('❌ User not found in database');
       return errorResponse(res, 401, 'Email ou mot de passe incorrect');
     }
     
-    console.log('👤 User details:', {
-      id: user._id,
-      email: user.email,
-      role: user.role,
-      isActive: user.isActive
-    });
-    
     if (!user.isActive) {
-      console.log('❌ User account is inactive');
       return errorResponse(res, 403, 'Compte désactivé');
     }
     
-    console.log('🔄 Calling comparePassword()...');
-    
     const isPasswordValid = await user.comparePassword(password);
     
-    console.log('✅ comparePassword result:', isPasswordValid);
-    
     if (!isPasswordValid) {
-      console.log('❌ Password validation failed');
       return errorResponse(res, 401, 'Email ou mot de passe incorrect');
     }
     
-    console.log('✅ Password is valid!');
-    
-    // FIXED: Use updateOne instead of save() to avoid middleware issue
+    // Mettre à jour lastLogin sans déclencher le middleware
     await User.updateOne(
       { _id: user._id },
       { $set: { lastLogin: new Date() } }
     );
     
-    console.log('📝 Generating JWT token...');
-    
+    // OPTIMISATION: Générer token avec toutes les infos nécessaires
     const token = generateToken({ 
       userId: user._id, 
       email: user.email, 
-      role: user.role 
+      role: user.role,
+      nom: user.nom,
+      prenom: user.prenom,
+      limiteAutorisation: user.limiteAutorisation,
+      agence: user.agence,
+      isActive: user.isActive
     });
+    
     const refreshToken = generateRefreshToken({ userId: user._id });
     
-    console.log('🎉 Login successful!');
-    console.log('🔍 ===== DEBUG LOGIN END =====');
+    logger.info(`Connexion: ${email} (role: ${user.role})`);
     
+    // OPTIMISATION: Réponse légère - le token contient déjà nom, prenom, role, etc.
     return successResponse(res, 200, 'Connexion réussie', {
-      user: user.toJSON(),
+      user: {
+        id: user._id,
+        email: user.email,
+        nom: user.nom,
+        prenom: user.prenom,
+        role: user.role,
+        // Seulement ce qui n'est pas dans le token
+        telephone: user.telephone,
+        numeroCompte: user.numeroCompte,
+        agence: user.agence,
+        limiteAutorisation: user.limiteAutorisation
+      },
       token,
       refreshToken
     });
     
   } catch (error) {
-    console.error('🔥 CRITICAL ERROR in login function:');
-    console.error('   Error name:', error.name);
-    console.error('   Error message:', error.message);
-    
     logger.error('Erreur connexion:', error);
     return errorResponse(res, 500, 'Erreur lors de la connexion');
   }
@@ -165,10 +162,16 @@ const refreshToken = async (req, res) => {
       return errorResponse(res, 401, 'Utilisateur non trouvé ou inactif');
     }
     
+    // OPTIMISATION: Générer nouveau token avec toutes les infos
     const newToken = generateToken({ 
       userId: user._id, 
       email: user.email, 
-      role: user.role 
+      role: user.role,
+      nom: user.nom,
+      prenom: user.prenom,
+      limiteAutorisation: user.limiteAutorisation,
+      agence: user.agence,
+      isActive: user.isActive
     });
     
     return successResponse(res, 200, 'Token rafraîchi', {
@@ -182,14 +185,39 @@ const refreshToken = async (req, res) => {
 
 const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.userId);
+    // OPTIMISATION: Récupérer seulement les infos non présentes dans le token
+    const user = await User.findById(req.userId)
+      .select('telephone numeroCompte classification notationClient kycValide dateKyc listeSMP soldeActuel decouvertAutorise');
     
     if (!user) {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
     
+    // OPTIMISATION: Combiner les infos du token (req.user) avec celles de la DB
     return successResponse(res, 200, 'Profil récupéré', {
-      user: user.toJSON()
+      user: {
+        // Depuis le token (déjà dans req.user si middleware optimisé)
+        id: req.userId,
+        email: req.user?.email || user.email,
+        nom: req.user?.nom || user.nom,
+        prenom: req.user?.prenom || user.prenom,
+        role: req.user?.role || user.role,
+        agence: req.user?.agence || user.agence,
+        limiteAutorisation: req.user?.limiteAutorisation || user.limiteAutorisation,
+        // Depuis la base de données
+        telephone: user.telephone,
+        numeroCompte: user.numeroCompte,
+        classification: user.classification,
+        notationClient: user.notationClient,
+        kycValide: user.kycValide,
+        dateKyc: user.dateKyc,
+        listeSMP: user.listeSMP,
+        soldeActuel: user.soldeActuel,
+        decouvertAutorise: user.decouvertAutorise,
+        isActive: user.isActive,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt
+      }
     });
     
   } catch (error) {
@@ -207,17 +235,29 @@ const updateProfile = async (req, res) => {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
     
+    // Mettre à jour
     if (nom) user.nom = nom;
     if (prenom) user.prenom = prenom;
     if (telephone) user.telephone = telephone;
     
     await user.save();
     
+    logger.info(`Profil mis à jour: ${user.email}`);
+    
+    // OPTIMISATION: Réponse légère après mise à jour
     return successResponse(res, 200, 'Profil mis à jour', {
-      user: user.toJSON()
+      user: {
+        id: user._id,
+        email: user.email,
+        nom: user.nom,
+        prenom: user.prenom,
+        telephone: user.telephone,
+        updatedAt: user.updatedAt
+      }
     });
     
   } catch (error) {
+    logger.error('Erreur mise à jour profil:', error);
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
@@ -251,9 +291,24 @@ const changePassword = async (req, res) => {
     
     logger.info(`Mot de passe changé: ${user.email}`);
     
-    return successResponse(res, 200, 'Mot de passe changé avec succès');
+    // OPTIMISATION: Générer un nouveau token après changement de mot de passe
+    const newToken = generateToken({ 
+      userId: user._id, 
+      email: user.email, 
+      role: user.role,
+      nom: user.nom,
+      prenom: user.prenom,
+      limiteAutorisation: user.limiteAutorisation,
+      agence: user.agence,
+      isActive: user.isActive
+    });
+    
+    return successResponse(res, 200, 'Mot de passe changé avec succès', {
+      token: newToken
+    });
     
   } catch (error) {
+    logger.error('Erreur changement mot de passe:', error);
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };

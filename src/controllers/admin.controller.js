@@ -1,12 +1,11 @@
-
-
 // ============================================
-// 6. CONTROLLER ADMIN - src/controllers/admin.controller.js
+// CONTROLLER ADMIN OPTIMISÉ - src/controllers/admin.controller.js
 // ============================================
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response.util');
 const logger = require('../utils/logger');
 
+// Création d'utilisateur avec réponse optimisée
 const createUser = async (req, res) => {
   try {
     const { 
@@ -15,20 +14,24 @@ const createUser = async (req, res) => {
       classification, notationClient, kycValide 
     } = req.body;
     
+    // Vérifier les permissions
     if (role === 'admin' && req.user.role !== 'admin') {
       return errorResponse(res, 403, 'Seul un admin peut créer un autre admin');
     }
     
+    // Vérifier l'email existant
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return errorResponse(res, 400, 'Cet email est déjà utilisé');
     }
     
+    // Validation des rôles
     const rolesAutorises = ['client', 'conseiller', 'rm', 'dce', 'adg', 'dga', 'risques', 'admin'];
     if (!rolesAutorises.includes(role)) {
       return errorResponse(res, 400, 'Rôle invalide');
     }
     
+    // Validation des champs requis
     if (['conseiller', 'rm', 'dce'].includes(role) && !agence) {
       return errorResponse(res, 400, 'L\'agence est requise pour ce rôle');
     }
@@ -37,6 +40,7 @@ const createUser = async (req, res) => {
       return errorResponse(res, 400, 'Le numéro de compte est requis pour un client');
     }
     
+    // Créer l'utilisateur
     const user = new User({
       nom,
       prenom,
@@ -55,10 +59,20 @@ const createUser = async (req, res) => {
     
     await user.save();
     
-    logger.info(`Utilisateur créé par admin: ${email} (role: ${role})`);
+    logger.info(`Utilisateur créé: ${email} (role: ${role}) par ${req.user.email}`);
     
-    return successResponse(res, 201, 'Utilisateur créé', {
-      user: user.toJSON()
+    // RÉPONSE OPTIMISÉE: Renvoyer seulement l'essentiel
+    return successResponse(res, 201, 'Utilisateur créé avec succès', {
+      user: {
+        id: user._id,
+        email: user.email,
+        nom: user.nom,
+        prenom: user.prenom,
+        role: user.role,
+        agence: user.agence,
+        isActive: user.isActive,
+        createdAt: user.createdAt
+      }
     });
     
   } catch (error) {
@@ -67,6 +81,7 @@ const createUser = async (req, res) => {
   }
 };
 
+// Mise à jour du rôle avec réponse optimisée
 const updateUserRole = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -78,15 +93,18 @@ const updateUserRole = async (req, res) => {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
     
+    // Empêcher de modifier son propre rôle
     if (userId === req.userId.toString()) {
       return errorResponse(res, 403, 'Vous ne pouvez pas modifier votre propre rôle');
     }
     
+    // Validation du rôle
     const rolesAutorises = ['client', 'conseiller', 'rm', 'dce', 'adg', 'dga', 'risques', 'admin'];
     if (role && !rolesAutorises.includes(role)) {
       return errorResponse(res, 400, 'Rôle invalide');
     }
     
+    // Mise à jour
     if (role) user.role = role;
     if (limiteAutorisation !== undefined) user.limiteAutorisation = limiteAutorisation;
     if (agence) user.agence = agence;
@@ -94,17 +112,27 @@ const updateUserRole = async (req, res) => {
     user.updatedBy = req.userId;
     await user.save();
     
-    logger.info(`Rôle modifié: ${user.email} -> ${role}`);
+    logger.info(`Rôle modifié: ${user.email} -> ${role} par ${req.user.email}`);
     
-    return successResponse(res, 200, 'Rôle mis à jour', {
-      user: user.toJSON()
+    // RÉPONSE OPTIMISÉE
+    return successResponse(res, 200, 'Rôle mis à jour avec succès', {
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        limiteAutorisation: user.limiteAutorisation,
+        agence: user.agence,
+        updatedAt: user.updatedAt
+      }
     });
     
   } catch (error) {
-    return errorResponse(res, 500, 'Erreur serveur');
+    logger.error('Erreur mise à jour rôle:', error);
+    return errorResponse(res, 500, 'Erreur lors de la mise à jour');
   }
 };
 
+// Liste des utilisateurs avec pagination optimisée
 const getAllUsers = async (req, res) => {
   try {
     const { role, agence, isActive, page = 1, limit = 20 } = req.query;
@@ -114,28 +142,44 @@ const getAllUsers = async (req, res) => {
     if (agence) filter.agence = agence;
     if (isActive !== undefined) filter.isActive = isActive === 'true';
     
+    // OPTIMISATION: Sélectionner seulement les champs nécessaires
     const users = await User.find(filter)
-      .select('-password -otpSecret')
+      .select('email nom prenom role agence isActive limiteAutorisation createdAt lastLogin')
       .limit(parseInt(limit))
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
     
     const total = await User.countDocuments(filter);
     
+    // OPTIMISATION: Structure de réponse légère
     return successResponse(res, 200, 'Utilisateurs récupérés', {
-      users,
+      users: users.map(user => ({
+        id: user._id,
+        email: user.email,
+        nom: user.nom,
+        prenom: user.prenom,
+        role: user.role,
+        agence: user.agence,
+        isActive: user.isActive,
+        limiteAutorisation: user.limiteAutorisation,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt
+      })),
       pagination: {
         total,
         page: parseInt(page),
+        limit: parseInt(limit),
         pages: Math.ceil(total / limit)
       }
     });
     
   } catch (error) {
+    logger.error('Erreur récupération utilisateurs:', error);
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
 
+// Activation/désactivation avec réponse optimisée
 const toggleUserStatus = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -154,13 +198,42 @@ const toggleUserStatus = async (req, res) => {
     user.updatedBy = req.userId;
     await user.save();
     
-    logger.info(`Statut modifié: ${user.email} -> ${user.isActive ? 'actif' : 'inactif'}`);
+    logger.info(`Statut modifié: ${user.email} -> ${user.isActive ? 'actif' : 'inactif'} par ${req.user.email}`);
     
+    // RÉPONSE OPTIMISÉE
     return successResponse(res, 200, `Utilisateur ${user.isActive ? 'activé' : 'désactivé'}`, {
+      user: {
+        id: user._id,
+        email: user.email,
+        isActive: user.isActive,
+        updatedAt: user.updatedAt
+      }
+    });
+    
+  } catch (error) {
+    logger.error('Erreur changement statut:', error);
+    return errorResponse(res, 500, 'Erreur serveur');
+  }
+};
+
+// Récupérer un utilisateur spécifique (pour admin)
+const getUserById = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const user = await User.findById(userId)
+      .select('-password -otpSecret -__v');
+    
+    if (!user) {
+      return errorResponse(res, 404, 'Utilisateur non trouvé');
+    }
+    
+    return successResponse(res, 200, 'Utilisateur récupéré', {
       user: user.toJSON()
     });
     
   } catch (error) {
+    logger.error('Erreur récupération utilisateur:', error);
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
@@ -169,5 +242,6 @@ module.exports = {
   createUser,
   updateUserRole,
   getAllUsers,
-  toggleUserStatus
+  toggleUserStatus,
+  getUserById
 };

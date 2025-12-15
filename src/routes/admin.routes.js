@@ -1,17 +1,18 @@
-// ============================================
-// 7. ROUTES ADMIN - src/routes/admin.routes.js
-// ============================================
+// routes/admin.routes.js
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
-const { authenticate, authorize } = require('../middleware/auth.middleware');
+const { authenticate, requireAdmin } = require('../middlewares/auth.middleware');
 
+// Toutes les routes admin nécessitent l'authentification admin
 router.use(authenticate);
-router.use(authorize('admin'));
+router.use(requireAdmin);
 
+// Gestion des utilisateurs
 router.post('/users', adminController.createUser);
 router.get('/users', adminController.getAllUsers);
+router.get('/users/:userId', adminController.getUserById);
 router.put('/users/:userId/role', adminController.updateUserRole);
-router.patch('/users/:userId/toggle-status', adminController.toggleUserStatus);
+router.put('/users/:userId/toggle-status', adminController.toggleUserStatus);
 
 module.exports = router;
