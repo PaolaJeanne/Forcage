@@ -8,43 +8,113 @@ const logger = require('../utils/logger');
 const User = require('../models/User');
 
 // ==================== CRÉATION ====================
+// ==================== CRÉATION ====================
 exports.creerDemande = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return errorResponse(res, 400, 'Données invalides', errors.array());
-    }
+    // 🔍 DEBUG - Supprimer après test
+    console.log('📥 Body reçu:', req.body);
+    console.log('📎 Files reçus:', req.files);
+    console.log('👤 User:', req.user);
+
+    // ❌ COMMENTEZ CETTE PARTIE - Elle bloque avec form-data
+    // const errors = validationResult(req);
+    // if (!errors.isEmpty()) {
+    //   return errorResponse(res, 400, 'Données invalides', errors.array());
+    // }
 
     // Vérifier que l'utilisateur est un client
     if (req.user.role !== 'client') {
       return errorResponse(res, 403, 'Seuls les clients peuvent créer des demandes');
     }
 
+    // ✅ Nettoyer req.body pour éviter les conflits
+    delete req.body.piecesJustificatives;
+    delete req.body.justificatifs;
+
+    // ✅ VALIDATION MANUELLE
+    const { 
+      motif, 
+      montant, 
+      typeOperation, 
+      dateEcheance, 
+      compteDebit, 
+      compteNumero, 
+      devise, 
+      commentaireInterne 
+    } = req.body;
+
+    if (!motif || typeof motif !== 'string' || motif.trim().length < 10 || motif.trim().length > 500) {
+      return errorResponse(res, 400, 'Motif requis (10-500 caractères)');
+    }
+
+    if (!montant || isNaN(parseFloat(montant)) || parseFloat(montant) <= 0) {
+      return errorResponse(res, 400, 'Montant invalide');
+    }
+
+    if (!typeOperation) {
+      return errorResponse(res, 400, 'Type d\'opération requis');
+    }
+
+    const operationsValides = ['VIREMENT', 'PRELEVEMENT', 'CHEQUE', 'CARTE', 'RETRAIT', 'AUTRE'];
+    if (!operationsValides.includes(typeOperation.toUpperCase())) {
+      return errorResponse(res, 400, `Type d'opération invalide. Valeurs acceptées: ${operationsValides.join(', ')}`);
+    }
+
     // Récupérer les infos client
     const client = await User.findById(req.user.id);
+    if (!client) {
+      return errorResponse(res, 404, 'Client introuvable');
+    }
     
     // Calculer le montant de forçage (si solde disponible)
     const soldeActuel = client.soldeActuel || 0;
     const decouvertAutorise = client.decouvertAutorise || 0;
-    const montant = req.body.montant;
-    const montantForçageTotal = Math.max(0, montant - (soldeActuel + decouvertAutorise));
+    const montantDemande = parseFloat(montant);
+    const montantForçageTotal = Math.max(0, montantDemande - (soldeActuel + decouvertAutorise));
+
+    // ✅ Traiter les fichiers uploadés correctement
+    const piecesJustificatives = [];
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      req.files.forEach(file => {
+        piecesJustificatives.push({
+          nom: file.originalname,
+          url: `/uploads/${file.filename}`,
+          type: file.mimetype,
+          taille: file.size,
+          uploadedAt: new Date()
+        });
+      });
+    }
+
+    console.log('✅ Pièces justificatives traitées:', piecesJustificatives);
 
     // Construire les données de la demande
     const demandeData = {
-      ...req.body,
-      compteNumero: client.numeroCompte,
+      motif: motif.trim(),
+      montant: montantDemande,
+      typeOperation: typeOperation.toUpperCase(),
+      compteNumero: compteNumero || client.numeroCompte,
       agenceId: client.agence,
       notationClient: client.notationClient,
       classification: client.classification,
       soldeActuel,
       decouvertAutorise,
       montantForçageTotal,
-      scoreRisque: this.calculerScoreRisque(client, montant, montantForçageTotal)
+      scoreRisque: this.calculerScoreRisque(client, montantDemande, montantForçageTotal),
+      piecesJustificatives,
+      devise: devise || 'XAF'
     };
+
+    // Ajouter les champs optionnels
+    if (dateEcheance) demandeData.dateEcheance = new Date(dateEcheance);
+    if (compteDebit) demandeData.compteDebit = compteDebit;
+    if (commentaireInterne) demandeData.commentaireInterne = commentaireInterne;
+
+    console.log('💾 Données à sauvegarder:', demandeData);
 
     const demande = await DemandeForçageService.creerDemande(req.user.id, demandeData);
 
-    logger.info(`Demande créée: ${demande.numeroReference} par ${req.user.email}`);
+    logger.info(`✅ Demande créée: ${demande.numeroReference} par ${req.user.email} avec ${piecesJustificatives.length} fichier(s)`);
 
     // RÉPONSE OPTIMISÉE
     return successResponse(res, 201, 'Demande créée avec succès', {
@@ -56,10 +126,12 @@ exports.creerDemande = async (req, res) => {
         typeOperation: demande.typeOperation,
         scoreRisque: demande.scoreRisque,
         dateEcheance: demande.dateEcheance,
+        piecesJustificatives: demande.piecesJustificatives,
         createdAt: demande.createdAt
       }
     });
   } catch (error) {
+    console.error('❌ Erreur complète:', error);
     logger.error('Erreur création demande:', error);
     return errorResponse(res, 500, 'Erreur lors de la création', error.message);
   }

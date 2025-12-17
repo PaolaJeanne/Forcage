@@ -3,16 +3,26 @@
 // ============================================
 const mongoose = require('mongoose');
 
+// ✅ NETTOYER LE CACHE MONGOOSE COMPLÈTEMENT
+delete mongoose.connection.models['DemandeForçage'];
+delete mongoose.models.DemandeForçage;
+
+// ✅ Sous-schéma explicite pour les pièces justificatives
+const pieceJustificativeSchema = new mongoose.Schema({
+  nom: String,
+  url: String,
+  type: String,
+  taille: Number,
+  uploadedAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 const demandeForçageSchema = new mongoose.Schema({
-  // Identification
   numeroReference: {
     type: String,
     required: true,
     unique: true,
-    index: true  // Gardez cette ligne
+    index: true
   },
-    
-  // Client
   clientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -22,8 +32,6 @@ const demandeForçageSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  
-  // Détails de l'opération
   typeOperation: {
     type: String,
     enum: ['VIREMENT', 'PRELEVEMENT', 'CHEQUE', 'CARTE', 'RETRAIT', 'AUTRE'],
@@ -40,20 +48,14 @@ const demandeForçageSchema = new mongoose.Schema({
     minlength: 10,
     maxlength: 500
   },
-  
-  // Informations complémentaires
   soldeActuel: Number,
   decouvertAutorise: Number,
-  montantForçageTotal: Number, // Montant total en dépassement
-  
-  // Statut et workflow
+  montantForçageTotal: Number,
   statut: {
     type: String,
     enum: ['BROUILLON', 'ENVOYEE', 'EN_ETUDE', 'EN_VALIDATION', 'VALIDEE', 'REFUSEE', 'ANNULEE'],
     default: 'BROUILLON'
   },
-  
-  // Traitement
   conseillerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -64,37 +66,24 @@ const demandeForçageSchema = new mongoose.Schema({
   },
   dateTraitement: Date,
   commentaireTraitement: String,
-  
-  // Décision
   montantAutorise: Number,
-  dateEcheance: Date, // J+15 par défaut
+  dateEcheance: Date,
   conditionsParticulieres: String,
   
-  // Pièces justificatives
-  piecesJustificatives: [{
-    nom: String,
-    url: String,
-    type: String,
-    taille: Number,
-    uploadedAt: { type: Date, default: Date.now }
-  }],
+  // ✅ UTILISER LE SOUS-SCHÉMA
+  piecesJustificatives: [pieceJustificativeSchema],
   
-  // Régularisation
   dateRegularisation: Date,
   regularisee: {
     type: Boolean,
     default: false
   },
-  
-  // Scoring et risque
   scoreRisque: {
     type: String,
     enum: ['FAIBLE', 'MOYEN', 'ELEVE', 'CRITIQUE'],
     default: 'MOYEN'
   },
   notationClient: String,
-  
-  // Historique des actions
   historique: [{
     action: String,
     statutAvant: String,
@@ -103,28 +92,28 @@ const demandeForçageSchema = new mongoose.Schema({
     commentaire: String,
     timestamp: { type: Date, default: Date.now }
   }],
-  
-  // Métadonnées
   agenceId: String,
   priorite: {
     type: String,
     enum: ['NORMALE', 'URGENTE'],
     default: 'NORMALE'
-  }
-  
+  },
+  compteDebit: String,
+  devise: { type: String, default: 'XAF' },
+  commentaireInterne: String,
+  classification: String
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });
 
-// Indexes pour performance
+// Indexes
 demandeForçageSchema.index({ clientId: 1, statut: 1 });
 demandeForçageSchema.index({ conseillerId: 1, statut: 1 });
-//demandeForçageSchema.index({ numeroReference: 1 });
 demandeForçageSchema.index({ createdAt: -1 });
 
-// Virtual pour vérifier si en retard
+// Virtual
 demandeForçageSchema.virtual('enRetard').get(function() {
   if (this.statut === 'VALIDEE' && this.dateEcheance && !this.regularisee) {
     return new Date() > this.dateEcheance;
@@ -132,7 +121,7 @@ demandeForçageSchema.virtual('enRetard').get(function() {
   return false;
 });
 
-// Méthode pour ajouter une action à l'historique
+// Méthode
 demandeForçageSchema.methods.ajouterHistorique = function(action, userId, commentaire = '') {
   this.historique.push({
     action,
@@ -142,6 +131,11 @@ demandeForçageSchema.methods.ajouterHistorique = function(action, userId, comme
     commentaire
   });
 };
+
+// ✅ Export simple
+const DemandeForçage = mongoose.model("DemandeForçage", demandeForçageSchema);
+
+//module.exports = DemandeForçage;
 
 module.exports =
   mongoose.models.DemandeForçage ||

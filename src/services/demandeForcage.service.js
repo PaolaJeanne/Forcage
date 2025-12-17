@@ -7,39 +7,43 @@ const { calculerScoreRisque } = require('../utils/riskCalculator');
 
 class DemandeForçageService {
   
-  // ==================== CRÉATION ====================
-  async creerDemande(clientId, data) {
-    // Récupérer les infos client pour enrichir la demande
-    const client = await User.findById(clientId);
-    
-    if (!client) {
-      throw new Error('Client introuvable');
-    }
-    
-    // Calculer le score de risque
-    const scoreRisque = this.calculerScoreRisqueDemande(client, data.montant);
-    
-    // Créer la demande
-    const demande = new DemandeForçage({
-      clientId,
-      ...data,
-      statut: 'BROUILLON',
-      dateEcheance: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000), // J+15
-      agenceId: client.agence,
-      notationClient: client.notationClient,
-      classification: client.classification,
-      scoreRisque,
-      priorite: this.determinerPriorite(scoreRisque, data.montant)
-    });
-    
-    // Ajouter à l'historique
-    demande.ajouterHistorique('CREATION', clientId, 'Demande créée');
-    
-    await demande.save();
-    
-    return demande;
-  }
+ // ==================== CRÉATION ====================
+async creerDemande(clientId, data) {
+  const client = await User.findById(clientId);
+  if (!client) throw new Error('Client introuvable');
   
+  const numeroReference = await this.genererNumeroReference();
+  const scoreRisque = this.calculerScoreRisqueDemande(client, data.montant);
+  
+  // ✅ UTILISER create() directement
+  const demande = await DemandeForçage.create({
+    numeroReference,
+    clientId,
+    statut: 'BROUILLON',
+    agenceId: client.agence,
+    notationClient: client.notationClient || data.notationClient,
+    classification: client.classification || data.classification,
+    scoreRisque,
+    priorite: this.determinerPriorite(scoreRisque, data.montant),
+    dateEcheance: data.dateEcheance || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+    ...data  // ✅ Spread à la fin pour que piecesJustificatives ne soit pas écrasé
+  });
+  
+  // Ajouter historique après création
+  demande.historique.push({
+    action: 'CREATION',
+    statutAvant: null,
+    statutApres: 'BROUILLON',
+    userId: clientId,
+    commentaire: 'Demande créée',
+    timestamp: new Date()
+  });
+  
+  await demande.save();
+  
+  return demande;
+}
+
   // ==================== LISTAGE ====================
   async listerDemandes(filters = {}, options = {}) {
     const { page = 1, limit = 20, sort = '-createdAt' } = options;
@@ -347,19 +351,43 @@ class DemandeForçageService {
   
   getWorkflowDisponible(userRole, demandeStatut) {
     const workflows = {
+      client: {
+        BROUILLON: ['SOUMETTRE', 'SUPPRIMER'],
+        ENVOYEE: ['ANNULER'],
+        EN_ETUDE: ['ANNULER']
+      },
       conseiller: {
         ENVOYEE: ['PRENDRE_EN_CHARGE', 'DEMANDER_INFO'],
-        EN_ETUDE: ['REFUSER', 'REMONTER', 'DEMANDER_INFO', 'VALIDER'],
+        EN_ETUDE: ['VALIDER', 'REFUSER', 'REMONTER', 'DEMANDER_INFO'],
         EN_VALIDATION: ['REFUSER', 'REMONTER', 'DEMANDER_INFO']
       },
       rm: {
+        ENVOYEE: ['PRENDRE_EN_CHARGE', 'VALIDER', 'REFUSER', 'DEMANDER_INFO'],
         EN_ETUDE: ['VALIDER', 'REFUSER', 'REMONTER', 'DEMANDER_INFO'],
         EN_VALIDATION: ['VALIDER', 'REFUSER', 'REMONTER', 'DEMANDER_INFO'],
         EN_VALIDATION_DCE: ['VALIDER', 'REFUSER', 'DEMANDER_INFO']
       },
       dce: {
+        ENVOYEE: ['PRENDRE_EN_CHARGE', 'VALIDER', 'REFUSER', 'DEMANDER_INFO'],
+        EN_ETUDE: ['VALIDER', 'REFUSER', 'REMONTER', 'DEMANDER_INFO'],
         EN_VALIDATION: ['VALIDER', 'REFUSER', 'DEMANDER_INFO'],
         EN_VALIDATION_DCE: ['VALIDER', 'REFUSER', 'DEMANDER_INFO']
+      },
+      adg: {
+        ENVOYEE: ['PRENDRE_EN_CHARGE', 'VALIDER', 'REFUSER', 'DEMANDER_INFO'],
+        EN_ETUDE: ['VALIDER', 'REFUSER', 'REMONTER', 'DEMANDER_INFO'],
+        EN_VALIDATION: ['VALIDER', 'REFUSER', 'DEMANDER_INFO'],
+        EN_VALIDATION_DCE: ['VALIDER', 'REFUSER', 'DEMANDER_INFO'],
+        VALIDEE: ['REGULARISER', 'ANNULER_VALIDATION'],
+        REFUSEE: ['REVOIR']
+      },
+      dga: {
+        ENVOYEE: ['PRENDRE_EN_CHARGE', 'VALIDER', 'REFUSER', 'DEMANDER_INFO'],
+        EN_ETUDE: ['VALIDER', 'REFUSER', 'REMONTER', 'DEMANDER_INFO'],
+        EN_VALIDATION: ['VALIDER', 'REFUSER', 'DEMANDER_INFO'],
+        EN_VALIDATION_DCE: ['VALIDER', 'REFUSER', 'DEMANDER_INFO'],
+        VALIDEE: ['REGULARISER', 'ANNULER_VALIDATION'],
+        REFUSEE: ['REVOIR']
       },
       admin: {
         BROUILLON: ['SUPPRIMER'],
@@ -568,6 +596,39 @@ class DemandeForçageService {
     
     await demande.save();
     return demande;
+  }
+
+  // ==================== GÉNÉRATION NUMÉRO DE RÉFÉRENCE ====================
+  async genererNumeroReference() {
+    const year = new Date().getFullYear();
+    const month = String(new Date().getMonth() + 1).padStart(2, '0');
+    
+    // Compter les demandes du mois pour avoir un numéro séquentiel
+    const startOfMonth = new Date(year, new Date().getMonth(), 1);
+    const endOfMonth = new Date(year, new Date().getMonth() + 1, 0);
+    
+    const count = await DemandeForçage.countDocuments({
+      createdAt: {
+        $gte: startOfMonth,
+        $lte: endOfMonth
+      }
+    });
+    
+    const sequence = String(count + 1).padStart(4, '0');
+    let numeroReference = `DF${year}${month}${sequence}`;
+    
+    // Vérifier l'unicité (au cas où)
+    let attempts = 0;
+    while (attempts < 10) {
+      const existing = await DemandeForçage.findOne({ numeroReference });
+      if (!existing) break;
+      
+      attempts++;
+      const newSequence = String(count + 1 + attempts).padStart(4, '0');
+      numeroReference = `DF${year}${month}${newSequence}`;
+    }
+    
+    return numeroReference;
   }
 }
 

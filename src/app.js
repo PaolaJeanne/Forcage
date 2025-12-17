@@ -4,9 +4,10 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const compression = require('compression');
+const path = require('path');
 const config = require('./config/env');
 const logger = require('./utils/logger');
-const errorHandler = require('./middleware/errorHandler');
+const { errorHandler, notFound } = require('./middlewares/errorHandler');
 const connectDB = require('./config/database');
 
 const app = express();
@@ -72,6 +73,16 @@ if (config.env === 'development') {
 app.use(compression());
 
 // ==========================================
+// Middleware de notifications
+// ==========================================
+app.use(require('./middlewares/notification.middleware').injectNotifications());
+
+// ==========================================
+// Servir les fichiers statiques (uploads)
+// ==========================================
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// ==========================================
 // Routes de test
 // ==========================================
 app.get('/', (req, res) => {
@@ -100,24 +111,16 @@ app.get('/health', (req, res) => {
 // ==========================================
 app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/demandes', require('./routes/demandeForçage.routes'));
-app.use('/api/v1/admin', require('./routes/admin.routes')); // Si vous avez des routes admin
-// app.use('/api/v1/documents', require('./routes/document.routes'));
-// app.use('/api/v1/dashboard', require('./routes/dashboard.routes')); // Pour les dashboards
+app.use('/api/v1/admin', require('./routes/admin.routes'));
+app.use('/api/v1/documents', require('./routes/document.routes'));
+app.use('/api/v1/audit', require('./routes/audit.routes')); 
+app.use('/api/v1/notifications', require('./routes/notification.routes'));
+// app.use('/api/v1/dashboard', require('./routes/dashboard.routes'));
 
 // ==========================================
-// Gestion des erreurs 404
+// Gestion des erreurs 404 & Erreurs globales
 // ==========================================
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route non trouvée',
-    path: req.originalUrl
-  });
-});
-
-// ==========================================
-// Middleware de gestion des erreurs
-// ==========================================
+app.use(notFound);
 app.use(errorHandler);
 
 // ==========================================
@@ -125,12 +128,10 @@ app.use(errorHandler);
 // ==========================================
 process.on('unhandledRejection', (err) => {
   logger.error('❌ Unhandled Rejection:', err);
-  // En production, vous pourriez vouloir redémarrer le serveur
 });
 
 process.on('uncaughtException', (err) => {
   logger.error('❌ Uncaught Exception:', err);
-  // En production, redémarrage sécurisé
   process.exit(1);
 });
 
@@ -143,6 +144,24 @@ const server = app.listen(config.port, () => {
   logger.info(`🔗 URL: http://localhost:${config.port}`);
   logger.info(`🗄️  Base de données: MongoDB`);
 });
+
+// ==========================================
+// WebSocket pour notifications (optionnel)
+// ==========================================
+// Décommentez si vous installez WebSocket
+
+try {
+  const setupNotificationWebSocket = require('./websocket/notification.socket');
+  const { sendRealTimeNotification } = setupNotificationWebSocket(server);
+  
+  // Exporter pour utilisation ailleurs
+  app.locals.sendRealTimeNotification = sendRealTimeNotification;
+  
+  logger.info('🔗 WebSocket pour notifications activé');
+} catch (error) {
+  logger.warn('⚠️ WebSocket non disponible, notifications en temps réel désactivées');
+}
+
 
 // Graceful shutdown
 process.on('SIGTERM', () => {

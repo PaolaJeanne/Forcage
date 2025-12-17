@@ -49,7 +49,8 @@ const getUserFromToken = (token) => {
   try {
     const decoded = jwt.verify(token, config.jwt.secret);
     return {
-      id: decoded.userId,
+      id: decoded.userId,           // ⭐ CRITIQUE: doit être l'ID MongoDB
+      _id: decoded.userId,          // Pour compatibilité
       email: decoded.email,
       role: decoded.role,
       nom: decoded.nom,
