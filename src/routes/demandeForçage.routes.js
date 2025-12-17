@@ -1,4 +1,4 @@
-// routes/demandeForçage.routes.js - VERSION FINALE AVEC NOTIFICATIONS
+// routes/demandeForçage.routes.js - VERSION CORRIGÉE
 const express = require('express');
 const router = express.Router();
 const demandeController = require('../controllers/demandeForçage.controller');
@@ -12,7 +12,13 @@ const {
   requireClient
 } = require('../middlewares/auth.middleware');
 const { auditLogger } = require('../middlewares/audit.middleware');
-const { autoNotify } = require('../middlewares/notification.middleware'); // ⭐ NOUVEAU
+
+// IMPORT CRITIQUE - vérifiez que ça marche
+console.log('🔍 [ROUTES] Chargement middleware notification...');
+const notificationMiddleware = require('../middlewares/notification.middleware');
+console.log('🔍 [ROUTES] Middleware chargé:', notificationMiddleware ? 'OK' : 'ERREUR');
+
+const { autoNotify } = notificationMiddleware;
 
 const {
   createDemandeValidator,
@@ -23,13 +29,30 @@ const {
 // ==================== ROUTES CLIENT ====================
 router.post('/',
   authenticate, 
-  requireClient, 
-  uploadMultiple,
+  requireClient,
   auditLogger('creation', 'demande'),
-  autoNotify('demande_creation', 'demande'), // ⭐ NOTIFICATION
-  demandeController.creerDemande
+  uploadMultiple,
+  createDemandeValidator,
+  
+  // DEBUG
+  (req, res, next) => {
+    console.log('🔍 [ROUTE DEBUG] Avant contrôleur');
+    console.log('🔍 User ID:', req.user?.id);
+    next();
+  },
+  
+  demandeController.creerDemande,
+  
+  // DEBUG
+  (req, res, next) => {
+    console.log('🔍 [ROUTE DEBUG] Après contrôleur, avant autoNotify');
+    next();
+  },
+  
+  autoNotify('demande_creation', 'demande')
 );
 
+// Routes GET
 router.get('/', 
   authenticate, 
   requireClient, 
@@ -49,24 +72,24 @@ router.patch('/:id/soumettre',
   authenticate, 
   requireClient,
   auditLogger('soumission', 'demande'),
-  autoNotify('demande_soumission', 'demande'), // ⭐ NOTIFICATION
-  demandeController.soumettreDemande
+  demandeController.soumettreDemande,
+  autoNotify('demande_soumission', 'demande')
 );
 
 router.patch('/:id/annuler', 
   authenticate, 
   requireClient,
   auditLogger('annulation', 'demande'),
-  autoNotify('demande_annulation', 'demande'), // ⭐ NOTIFICATION
-  demandeController.annulerDemande
+  demandeController.annulerDemande,
+  autoNotify('demande_annulation', 'demande')
 );
 
 router.put('/:id', 
   authenticate, 
   requireClient,
   auditLogger('modification', 'demande'),
-  autoNotify('demande_modification', 'demande'), // ⭐ NOTIFICATION
-  demandeController.mettreAJourDemande
+  demandeController.mettreAJourDemande,
+  autoNotify('demande_modification', 'demande')
 );
 
 // ==================== ROUTES CONSEILLER ====================
@@ -109,24 +132,24 @@ router.patch('/:id/traiter',
   authorize('conseiller', 'rm', 'dce', 'admin', 'dga', 'adg', 'risques'), 
   updateStatutValidator,
   auditLogger('traitement', 'demande'),
-  autoNotify('demande_traitement', 'demande'), // ⭐ NOTIFICATION
-  demandeController.traiterDemande
+  demandeController.traiterDemande,
+  autoNotify('demande_traitement', 'demande')
 );
 
 router.patch('/:id/remonter', 
   authenticate, 
   authorize('conseiller', 'rm', 'dce', 'admin', 'dga', 'adg'),
   auditLogger('remontee', 'demande'),
-  autoNotify('demande_remontee', 'demande'), // ⭐ NOTIFICATION
-  demandeController.remonterDemande
+  demandeController.remonterDemande,
+  autoNotify('demande_remontee', 'demande')
 );
 
 router.patch('/:id/regulariser', 
   authenticate, 
   authorize('conseiller', 'rm', 'dce', 'admin', 'dga', 'adg', 'risques'),
   auditLogger('regularisation', 'demande'),
-  autoNotify('demande_regularisation', 'demande'), // ⭐ NOTIFICATION
-  demandeController.regulariser
+  demandeController.regulariser,
+  autoNotify('demande_regularisation', 'demande')
 );
 
 module.exports = router;

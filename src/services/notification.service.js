@@ -1,207 +1,169 @@
 // src/services/notification.service.js
 const Notification = require('../models/Notification');
-const logger = require('../utils/logger');
+const NotificationTemplate = require('../models/NotificationTemplate');
 
 class NotificationService {
   
   /**
-   * Créer une notification
+   * Créer une notification directe (sans template)
    */
   static async create(notificationData) {
     try {
       const notification = new Notification(notificationData);
       await notification.save();
+      console.log(`✅ Notification créée: ${notification.titre}`);
       
-      // Log pour debug
-      logger.info(`📢 Notification créée: ${notification.titre} pour ${notification.utilisateur}`);
-      
-      // Ici, vous pourriez ajouter:
-      // - WebSocket pour notification en temps réel
-      // - Email si notification importante
-      // - SMS si urgence
+      // TODO: Émettre via WebSocket
+      // this.emitToUser(notification.utilisateur, notification);
       
       return notification;
     } catch (error) {
-      logger.error('❌ Erreur création notification:', error);
+      console.error('❌ Erreur création notification:', error);
       throw error;
     }
   }
   
   /**
-   * Notifier la création d'une demande
+   * ✅ NOUVEAU : Créer une notification depuis un template
    */
-  static async notifyDemandeCreation(demande, createur) {
-    // Notifier les conseillers de l'agence
-    const User = require('../models/User');
-    const conseillers = await User.find({
-      role: 'conseiller',
-      agence: createur.agence,
-      isActive: true
-    });
-    
-    const notifications = conseillers.map(conseiller => ({
-      utilisateur: conseiller._id,
-      type: 'demande_creation',
-      titre: 'Nouvelle demande',
-      message: `${createur.prenom} ${createur.nom} a créé une demande de ${demande.montant} FCFA`,
-      entite: 'demande',
-      entiteId: demande._id,
-      lien: `/demandes/${demande._id}`,
-      priorite: 'moyenne',
-      metadata: {
-        demandeId: demande._id,
-        clientId: createur._id,
-        montant: demande.montant,
-        agence: createur.agence
+  static async createFromTemplate(templateCode, userId, variables = {}, options = {}) {
+    try {
+      // Récupérer le template
+      const template = await NotificationTemplate.findOne({ 
+        code: templateCode.toUpperCase(), 
+        actif: true 
+      });
+      
+      if (!template) {
+        throw new Error(`Template ${templateCode} introuvable`);
       }
-    }));
-    
-    await Notification.insertMany(notifications);
-    logger.info(`📢 Notifications envoyées à ${conseillers.length} conseillers`);
+      
+      // Remplacer les variables dans le titre et le message
+      const titre = this.replaceVariables(template.titreTemplate, variables);
+      const message = this.replaceVariables(template.messageTemplate, variables);
+      
+      // Créer la notification
+      const notificationData = {
+        utilisateur: userId,
+        type: template.type,
+        titre,
+        message,
+        priorite: template.priorite,
+        templateCode: template.code,
+        entite: options.entite || null,
+        entiteId: options.entiteId || null,
+        lien: options.lien || null,
+        metadata: {
+          ...options.metadata,
+          templateCode: template.code,
+          variables
+        }
+      };
+      
+      return await this.create(notificationData);
+    } catch (error) {
+      console.error('❌ Erreur création notification depuis template:', error);
+      throw error;
+    }
   }
   
   /**
-   * Notifier la validation d'une demande
+   * ✅ NOUVEAU : Créer des notifications pour plusieurs utilisateurs
    */
-  static async notifyDemandeValidation(demande, validateur, niveau) {
+  static async createBulkFromTemplate(templateCode, userIds, variables = {}, options = {}) {
     const notifications = [];
     
-    // Notifier le client
-    notifications.push({
-      utilisateur: demande.clientId,
-      type: 'demande_validation',
-      titre: `Demande ${niveau === 'final' ? 'validée' : 'en cours'}`,
-      message: `Votre demande de ${demande.montant} FCFA a été ${niveau === 'final' ? 'validée définitivement' : 'validée par ' + validateur.role}`,
-      entite: 'demande',
-      entiteId: demande._id,
-      lien: `/demandes/${demande._id}`,
-      priorite: 'haute',
-      metadata: {
-        validateur: validateur._id,
-        niveau: niveau,
-        statut: demande.statut
+    for (const userId of userIds) {
+      try {
+        const notification = await this.createFromTemplate(
+          templateCode, 
+          userId, 
+          variables, 
+          options
+        );
+        notifications.push(notification);
+      } catch (error) {
+        console.error(`❌ Erreur pour user ${userId}:`, error.message);
       }
-    });
-    
-    // Si validation intermédiaire, notifier le niveau supérieur
-    if (niveau === 'intermediaire') {
-      const User = require('../models/User');
-      const nextLevel = validateur.role === 'conseiller' ? 'rm' : 'dce';
-      
-      const responsables = await User.find({
-        role: nextLevel,
-        agence: validateur.agence,
-        isActive: true
-      });
-      
-      responsables.forEach(responsable => {
-        notifications.push({
-          utilisateur: responsable._id,
-          type: 'demande_validation',
-          titre: 'Demande à valider',
-          message: `Une demande de ${demande.montant} FCFA nécessite votre validation`,
-          entite: 'demande',
-          entiteId: demande._id,
-          lien: `/demandes/${demande._id}`,
-          priorite: 'haute',
-          metadata: {
-            previousValidator: validateur._id,
-            montant: demande.montant
-          }
-        });
-      });
     }
     
-    await Notification.insertMany(notifications);
+    return notifications;
   }
   
   /**
-   * Notifier un événement d'audit important
+   * ✅ NOUVEAU : Remplacer les variables {{variable}} dans un texte
    */
-  static async notifyAuditEvent(auditLog, threshold = 10) {
-    // Exemple: Notifier si trop d'échecs de connexion
-    if (auditLog.action === 'tentative_connexion' && auditLog.details?.statusCode === 401) {
-      const recentFailures = await Notification.countDocuments({
-        'metadata.type': 'failed_login',
-        'metadata.ip': auditLog.ipAddress,
-        createdAt: { $gt: new Date(Date.now() - 15 * 60 * 1000) } // 15 dernières minutes
-      });
-      
-      if (recentFailures >= threshold) {
-        // Notifier l'admin
-        const User = require('../models/User');
-        const admins = await User.find({ role: 'admin', isActive: true });
-        
-        admins.forEach(admin => {
-          this.create({
-            utilisateur: admin._id,
-            type: 'audit_alert',
-            titre: 'Alertes de sécurité',
-            message: `${recentFailures} tentatives de connexion échouées depuis ${auditLog.ipAddress}`,
-            entite: 'audit',
-            entiteId: auditLog._id,
-            priorite: 'urgente',
-            metadata: {
-              type: 'failed_login_brute_force',
-              ip: auditLog.ipAddress,
-              count: recentFailures,
-              timestamp: new Date()
-            }
-          });
-        });
-      }
+  static replaceVariables(texte, variables) {
+    let resultat = texte;
+    
+    for (const [cle, valeur] of Object.entries(variables)) {
+      const regex = new RegExp(`{{${cle}}}`, 'g');
+      resultat = resultat.replace(regex, valeur || '');
     }
+    
+    return resultat;
   }
   
   /**
    * Récupérer les notifications d'un utilisateur
    */
   static async getUserNotifications(userId, options = {}) {
-    const { limit = 20, page = 1, unreadOnly = false } = options;
+    const { 
+      limit = 20, 
+      page = 1,
+      unreadOnly = false,
+      priorite = null,
+      type = null
+    } = options;
     
     const query = { utilisateur: userId };
     if (unreadOnly) query.lue = false;
+    if (priorite) query.priorite = priorite;
+    if (type) query.type = type;
+    
+    const skip = (page - 1) * limit;
     
     const notifications = await Notification.find(query)
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .skip((page - 1) * limit);
+      .sort({ priorite: -1, createdAt: -1 }) // Priorité d'abord
+      .skip(skip)
+      .limit(limit);
     
     const total = await Notification.countDocuments(query);
+    const unread = await Notification.countDocuments({ 
+      utilisateur: userId, 
+      lue: false 
+    });
     
     return {
       notifications,
       pagination: {
         total,
+        unread,
         page,
-        pages: Math.ceil(total / limit),
-        limit
+        limit,
+        pages: Math.ceil(total / limit)
       }
     };
   }
   
   /**
-   * Marquer une notification comme lue
+   * Marquer comme lue
    */
   static async markAsRead(notificationId, userId) {
-    const notification = await Notification.findOne({
-      _id: notificationId,
-      utilisateur: userId
-    });
-    
-    if (!notification) {
-      throw new Error('Notification non trouvée');
-    }
-    
-    notification.lue = true;
-    notification.lueAt = new Date();
-    await notification.save();
+    const notification = await Notification.findOneAndUpdate(
+      { _id: notificationId, utilisateur: userId },
+      { 
+        lue: true,
+        lueAt: new Date()
+      },
+      { new: true }
+    );
     
     return notification;
   }
   
   /**
-   * Marquer toutes les notifications comme lues
+   * ✅ NOUVEAU : Marquer toutes comme lues
    */
   static async markAllAsRead(userId) {
     const result = await Notification.updateMany(
@@ -212,24 +174,27 @@ class NotificationService {
       }
     );
     
-    return result.modifiedCount;
+    return result;
   }
   
   /**
-   * Supprimer les anciennes notifications
+   * ✅ NOUVEAU : Supprimer une notification
    */
-  static async cleanOldNotifications(daysToKeep = 30) {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-    
-    const result = await Notification.deleteMany({
-      createdAt: { $lt: cutoffDate },
-      lue: true,
-      priorite: { $in: ['basse', 'moyenne'] }
+  static async deleteNotification(notificationId, userId) {
+    return await Notification.findOneAndDelete({
+      _id: notificationId,
+      utilisateur: userId
     });
-    
-    logger.info(`🧹 ${result.deletedCount} anciennes notifications supprimées`);
-    return result.deletedCount;
+  }
+  
+  /**
+   * ✅ NOUVEAU : Compter les non lues
+   */
+  static async getUnreadCount(userId) {
+    return await Notification.countDocuments({
+      utilisateur: userId,
+      lue: false
+    });
   }
 }
 

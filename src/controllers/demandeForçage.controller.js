@@ -1,13 +1,11 @@
-// ============================================
-// CONTROLLER DEMANDE FORÇAGE COMPLET - src/controllers/demandeForçage.controller.js
-// ============================================
+// src/controllers/demandeForçage.controller.js - VERSION CORRIGÉE
 const DemandeForçageService = require('../services/demandeForcage.service');
 const { validationResult } = require('express-validator');
 const { successResponse, errorResponse } = require('../utils/response.util');
 const logger = require('../utils/logger');
 const User = require('../models/User');
+const NotificationService = require('../services/notification.service');
 
-// ==================== CRÉATION ====================
 // ==================== CRÉATION ====================
 exports.creerDemande = async (req, res) => {
   try {
@@ -15,12 +13,6 @@ exports.creerDemande = async (req, res) => {
     console.log('📥 Body reçu:', req.body);
     console.log('📎 Files reçus:', req.files);
     console.log('👤 User:', req.user);
-
-    // ❌ COMMENTEZ CETTE PARTIE - Elle bloque avec form-data
-    // const errors = validationResult(req);
-    // if (!errors.isEmpty()) {
-    //   return errorResponse(res, 400, 'Données invalides', errors.array());
-    // }
 
     // Vérifier que l'utilisateur est un client
     if (req.user.role !== 'client') {
@@ -112,11 +104,56 @@ exports.creerDemande = async (req, res) => {
 
     console.log('💾 Données à sauvegarder:', demandeData);
 
+    // Créer la demande
     const demande = await DemandeForçageService.creerDemande(req.user.id, demandeData);
+
+    // 🔔 NOTIFICATION - Option 1: Via NotificationService (si la méthode existe)
+    try {
+      // Vérifier si la méthode createFromTemplate existe
+      if (NotificationService.createFromTemplate) {
+        await NotificationService.createFromTemplate(
+          'DEMANDE_CREEE',
+          req.user.id,
+          {
+            numeroReference: demande.numeroReference,
+            typeOperation: demande.typeOperation,
+            montant: demande.montant.toLocaleString('fr-FR')
+          },
+          {
+            entite: 'demande',
+            entiteId: demande._id,
+            lien: `/demandes/${demande._id}`
+          }
+        );
+        console.log('✅ Notification via createFromTemplate envoyée');
+      } 
+      // Option 2: Via create simple
+      else if (NotificationService.create) {
+        await NotificationService.create({
+          utilisateur: req.user.id,
+          type: 'success',
+          titre: 'Demande créée',
+          message: `Votre demande #${demande.numeroReference} a été créée avec succès`,
+          entite: 'demande',
+          entiteId: demande._id,
+          lien: `/demandes/${demande._id}`,
+          lue: false,
+          metadata: {
+            demandeId: demande._id,
+            montant: demande.montant,
+            typeOperation: demande.typeOperation
+          }
+        });
+        console.log('✅ Notification simple créée');
+      }
+    } catch (notificationError) {
+      console.error('⚠️ Erreur lors de la création de la notification:', notificationError.message);
+      // NE PAS bloquer la réponse principale
+    }
 
     logger.info(`✅ Demande créée: ${demande.numeroReference} par ${req.user.email} avec ${piecesJustificatives.length} fichier(s)`);
 
-    // RÉPONSE OPTIMISÉE
+    // UN SEUL RETOUR DE RÉPONSE
     return successResponse(res, 201, 'Demande créée avec succès', {
       demande: {
         id: demande._id,
@@ -130,6 +167,7 @@ exports.creerDemande = async (req, res) => {
         createdAt: demande.createdAt
       }
     });
+    
   } catch (error) {
     console.error('❌ Erreur complète:', error);
     logger.error('Erreur création demande:', error);
@@ -202,6 +240,24 @@ exports.soumettreDemande = async (req, res) => {
     // Assigner automatiquement un conseiller
     await DemandeForçageService.assignerConseillerAutomatique(req.params.id);
 
+    // 🔔 NOTIFICATION
+    try {
+      if (NotificationService.create) {
+        await NotificationService.create({
+          utilisateur: req.user.id,
+          type: 'info',
+          titre: 'Demande soumise',
+          message: `Votre demande #${demandeSoumise.numeroReference} a été soumise pour traitement`,
+          entite: 'demande',
+          entiteId: demandeSoumise._id,
+          lien: `/demandes/${demandeSoumise._id}`,
+          lue: false
+        });
+      }
+    } catch (notifError) {
+      console.error('⚠️ Erreur notification soumission:', notifError.message);
+    }
+
     logger.info(`Demande soumise: ${demandeSoumise.numeroReference} par ${req.user.email}`);
 
     return successResponse(res, 200, 'Demande soumise avec succès', {
@@ -230,6 +286,24 @@ exports.annulerDemande = async (req, res) => {
     }
 
     const demandeAnnulee = await DemandeForçageService.annulerDemande(req.params.id, req.user.id);
+
+    // 🔔 NOTIFICATION
+    try {
+      if (NotificationService.create) {
+        await NotificationService.create({
+          utilisateur: req.user.id,
+          type: 'warning',
+          titre: 'Demande annulée',
+          message: `Votre demande #${demandeAnnulee.numeroReference} a été annulée`,
+          entite: 'demande',
+          entiteId: demandeAnnulee._id,
+          lien: `/demandes/${demandeAnnulee._id}`,
+          lue: false
+        });
+      }
+    } catch (notifError) {
+      console.error('⚠️ Erreur notification annulation:', notifError.message);
+    }
 
     logger.info(`Demande annulée: ${demandeAnnulee.numeroReference} par ${req.user.email}`);
 
@@ -282,6 +356,30 @@ exports.traiterDemande = async (req, res) => {
       }
     );
 
+    // 🔔 NOTIFICATION
+    try {
+      if (NotificationService.create) {
+        const messages = {
+          'VALIDER': `Votre demande #${demandeTraitee.numeroReference} a été validée`,
+          'REFUSER': `Votre demande #${demandeTraitee.numeroReference} a été refusée`,
+          'DEMANDER_INFO': `Des informations supplémentaires sont requises pour votre demande #${demandeTraitee.numeroReference}`
+        };
+        
+        await NotificationService.create({
+          utilisateur: demandeTraitee.clientId._id,
+          type: action === 'VALIDER' ? 'success' : action === 'REFUSER' ? 'error' : 'warning',
+          titre: `Demande ${action === 'VALIDER' ? 'validée' : action === 'REFUSER' ? 'refusée' : 'en attente'}`,
+          message: messages[action] || `Votre demande #${demandeTraitee.numeroReference} a été traitée`,
+          entite: 'demande',
+          entiteId: demandeTraitee._id,
+          lien: `/demandes/${demandeTraitee._id}`,
+          lue: false
+        });
+      }
+    } catch (notifError) {
+      console.error('⚠️ Erreur notification traitement:', notifError.message);
+    }
+
     logger.info(`Demande traitée: ${demandeTraitee.numeroReference} - ${action} par ${req.user.email}`);
 
     return successResponse(res, 200, `Demande ${this.getLabelAction(action)} avec succès`, {
@@ -321,6 +419,24 @@ exports.remonterDemande = async (req, res) => {
       commentaire
     );
 
+    // 🔔 NOTIFICATION
+    try {
+      if (NotificationService.create) {
+        await NotificationService.create({
+          utilisateur: demandeRemontee.clientId._id,
+          type: 'info',
+          titre: 'Demande remontée',
+          message: `Votre demande #${demandeRemontee.numeroReference} a été remontée au niveau supérieur`,
+          entite: 'demande',
+          entiteId: demandeRemontee._id,
+          lien: `/demandes/${demandeRemontee._id}`,
+          lue: false
+        });
+      }
+    } catch (notifError) {
+      console.error('⚠️ Erreur notification remontée:', notifError.message);
+    }
+
     logger.info(`Demande remontée: ${demandeRemontee.numeroReference} par ${req.user.email}`);
 
     return successResponse(res, 200, 'Demande remontée au niveau supérieur', {
@@ -353,6 +469,24 @@ exports.regulariser = async (req, res) => {
     }
 
     const demandeRegularisee = await DemandeForçageService.regulariser(req.params.id, req.user.id);
+
+    // 🔔 NOTIFICATION
+    try {
+      if (NotificationService.create) {
+        await NotificationService.create({
+          utilisateur: demandeRegularisee.clientId._id,
+          type: 'success',
+          titre: 'Demande régularisée',
+          message: `Votre demande #${demandeRegularisee.numeroReference} a été régularisée`,
+          entite: 'demande',
+          entiteId: demandeRegularisee._id,
+          lien: `/demandes/${demandeRegularisee._id}`,
+          lue: false
+        });
+      }
+    } catch (notifError) {
+      console.error('⚠️ Erreur notification régularisation:', notifError.message);
+    }
 
     logger.info(`Demande régularisée: ${demandeRegularisee.numeroReference} par ${req.user.email}`);
 
@@ -414,11 +548,30 @@ exports.mettreAJourDemande = async (req, res) => {
     }
 
     // Mettre à jour
-    const demandeMaj = await DemandeForçage.updateOne(
+    const DemandeForçage = require('../models/DemandeForçage');
+    const demandeMaj = await DemandeForçage.findOneAndUpdate(
       { _id: req.params.id },
       { $set: req.body },
       { new: true }
     ).populate('clientId', 'nom prenom email');
+
+    // 🔔 NOTIFICATION
+    try {
+      if (NotificationService.create) {
+        await NotificationService.create({
+          utilisateur: req.user.id,
+          type: 'info',
+          titre: 'Demande modifiée',
+          message: `Votre demande #${demandeMaj.numeroReference} a été mise à jour`,
+          entite: 'demande',
+          entiteId: demandeMaj._id,
+          lien: `/demandes/${demandeMaj._id}`,
+          lue: false
+        });
+      }
+    } catch (notifError) {
+      console.error('⚠️ Erreur notification modification:', notifError.message);
+    }
 
     logger.info(`Demande mise à jour: ${demandeMaj.numeroReference} par ${req.user.email}`);
 
@@ -634,6 +787,7 @@ exports.enrichirStatistiques = async (stats, user) => {
   
   if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
     // Récupérer les stats par agence
+    const DemandeForçage = require('../models/DemandeForçage');
     const statsAgence = await DemandeForçage.aggregate([
       { $group: {
         _id: '$agenceId',

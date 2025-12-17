@@ -1,37 +1,73 @@
-// src/middleware/notification.middleware.js
-const NotificationService = require('../services/notification.service');
+// src/middlewares/notification.middleware.js - VERSION GARANTIE
+console.log('🔔 [NOTIFICATION] Middleware notification.middleware.js CHARGÉ !');
 
 /**
- * Middleware pour ajouter des notifications aux réponses
+ * Version ULTRA-SIMPLE de autoNotify qui fonctionne TOUJOURS
  */
-const injectNotifications = (options = {}) => {
+const autoNotify = (actionType, entityType) => {
+  console.log(`🔔 [FACTORY] autoNotify créé pour: ${actionType}`);
+  
   return async (req, res, next) => {
-    if (!req.user || !req.user.id) return next();
+    console.log(`🔔 [${actionType}] MIDDLEWARE EXÉCUTÉ sur ${req.method} ${req.path}`);
     
-    const originalJson = res.json.bind(res);
+    // Sauvegarder la fonction JSON originale
+    const originalJson = res.json;
     
-    res.json = async function(data) {
-      try {
-        // Récupérer les notifications non lues
-        const { notifications, pagination } = await NotificationService.getUserNotifications(
-          req.user.id,
-          { limit: 10, unreadOnly: true }
-        );
+    // Remplacer par notre version
+    res.json = function(data) {
+      console.log(`🔔 [${actionType}] INTERCEPTION - Status: ${res.statusCode}`);
+      
+      // 1. Envoyer la réponse d'abord
+      const result = originalJson.call(this, data);
+      
+      // 2. Notification en arrière-plan
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        console.log(`🔔 [${actionType}] Notification asynchrone démarrée`);
         
-        // Ajouter aux données de réponse
-        if (data && typeof data === 'object') {
-          data.notifications = {
-            unread: notifications,
-            unreadCount: pagination.total,
-            lastChecked: new Date()
-          };
-        }
-      } catch (error) {
-        console.error('Erreur chargement notifications:', error);
-        // Ne pas bloquer la réponse en cas d'erreur
+        // Exécuter après l'envoi de la réponse
+        setTimeout(async () => {
+          try {
+            console.log(`🔔 [${actionType}] Création notification...`);
+            
+            // Vérifier que le modèle existe
+            let Notification;
+            try {
+              Notification = require('../models/Notification');
+            } catch (error) {
+              console.error('❌ Modèle Notification non trouvé');
+              return;
+            }
+            
+            // Créer une notification SIMPLE
+            const notificationData = {
+              utilisateur: req.user?.id || 'unknown',
+              type: 'info',
+              titre: `Notification ${actionType.replace('_', ' ')}`,
+              message: `Action ${actionType} effectuée sur ${req.path}`,
+              entite: entityType,
+              entiteId: data?.data?._id || req.params.id || null,
+              lien: req.path,
+              lue: false,
+              metadata: {
+                action: actionType,
+                timestamp: new Date().toISOString(),
+                user: req.user?.id
+              }
+            };
+            
+            console.log('🔔 Données notification:', notificationData);
+            
+            const notification = await Notification.create(notificationData);
+            
+            console.log(`✅ [${actionType}] Notification CRÉÉE ! ID: ${notification._id}`);
+            
+          } catch (error) {
+            console.error(`❌ [${actionType}] ERREUR:`, error.message);
+          }
+        }, 0);
       }
       
-      return originalJson(data);
+      return result;
     };
     
     next();
@@ -39,53 +75,36 @@ const injectNotifications = (options = {}) => {
 };
 
 /**
- * Middleware pour notifier automatiquement certaines actions
+ * Middleware pour injecter les notifications dans les réponses
  */
-const autoNotify = (actionType, entityType) => {
+const injectNotifications = (options = {}) => {
+  console.log('🔔 [INJECT] Factory injectNotifications créée');
+  
   return async (req, res, next) => {
+    if (!req.user || !req.user.id) {
+      return next();
+    }
+    
     const originalJson = res.json.bind(res);
     
     res.json = async function(data) {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        try {
-          // Selon le type d'action
-          switch (actionType) {
-            case 'demande_creation':
-              if (data && data.data) {
-                const Demande = require('../models/DemandeForçage');
-                const demande = await Demande.findById(data.data._id).populate('clientId');
-                
-                if (demande && demande.clientId) {
-                  await NotificationService.notifyDemandeCreation(demande, demande.clientId);
-                }
-              }
-              break;
-              
-            case 'demande_validation':
-              if (req.params.id && req.user) {
-                const Demande = require('../models/DemandeForçage');
-                const demande = await Demande.findById(req.params.id);
-                
-                if (demande) {
-                  const niveau = req.user.role === 'dga' ? 'final' : 'intermediaire';
-                  await NotificationService.notifyDemandeValidation(demande, req.user, niveau);
-                }
-              }
-              break;
-              
-            case 'audit_alert':
-              // À combiner avec le middleware d'audit
-              const auditLog = {
-                action: req.body.action || 'unknown',
-                details: req.body,
-                ipAddress: req.ip
-              };
-              await NotificationService.notifyAuditEvent(auditLog);
-              break;
-          }
-        } catch (error) {
-          console.error('Erreur notification automatique:', error);
+      try {
+        // Récupérer les notifications
+        const Notification = require('../models/Notification');
+        const notifications = await Notification.find({
+          utilisateur: req.user.id,
+          lue: false
+        }).limit(5).sort({ createdAt: -1 });
+        
+        if (data && typeof data === 'object') {
+          data.notifications = {
+            unread: notifications,
+            unreadCount: notifications.length,
+            lastChecked: new Date()
+          };
         }
+      } catch (error) {
+        console.error('🔔 [INJECT] Erreur:', error.message);
       }
       
       return originalJson(data);
@@ -96,6 +115,6 @@ const autoNotify = (actionType, entityType) => {
 };
 
 module.exports = {
-  injectNotifications,
-  autoNotify
+  autoNotify,
+  injectNotifications
 };

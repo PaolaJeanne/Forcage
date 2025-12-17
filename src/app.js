@@ -1,3 +1,4 @@
+// app.js - VERSION CORRIGÉE
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -16,7 +17,14 @@ const app = express();
 // Connexion à MongoDB
 // ==========================================
 connectDB();
+// app.js
+const NotificationTemplateService = require('./services/notificationTemplate.service');
 
+connectDB().then(async () => {
+  // Initialiser les templates
+  await NotificationTemplateService.initialiserTemplatesParDefaut();
+  logger.info('✅ Templates de notifications initialisés');
+});
 // ==========================================
 // Middlewares de Sécurité
 // ==========================================
@@ -73,9 +81,38 @@ if (config.env === 'development') {
 app.use(compression());
 
 // ==========================================
-// Middleware de notifications
+// ROUTE DE TEST DU MIDDLEWARE - AJOUTEZ CE BLOOC
 // ==========================================
-app.use(require('./middlewares/notification.middleware').injectNotifications());
+console.log('🔍 [APP] Création route de test...');
+const { autoNotify: testAutoNotify } = require('./middlewares/notification.middleware');
+
+app.get('/api/test-notification',
+  (req, res, next) => {
+    // Simuler un utilisateur
+    req.user = { 
+      id: '693fe20c884cfd7aaefc827e',
+      email: 'test@example.com',
+      role: 'client'
+    };
+    console.log('🧪 [TEST] Utilisateur simulé:', req.user.id);
+    next();
+  },
+  testAutoNotify('test_event', 'test'),
+  (req, res) => {
+    console.log('🧪 [TEST] Contrôleur exécuté');
+    res.status(201).json({
+      success: true,
+      message: 'Test de notification réussi',
+      data: { 
+        _id: 'test123',
+        numero: 'TEST-001',
+        montant: 5000
+      }
+    });
+  }
+);
+
+console.log('🔍 [APP] Route de test créée: GET /api/test-notification');
 
 // ==========================================
 // Servir les fichiers statiques (uploads)
@@ -148,20 +185,16 @@ const server = app.listen(config.port, () => {
 // ==========================================
 // WebSocket pour notifications (optionnel)
 // ==========================================
-// Décommentez si vous installez WebSocket
-
 try {
   const setupNotificationWebSocket = require('./websocket/notification.socket');
   const { sendRealTimeNotification } = setupNotificationWebSocket(server);
   
-  // Exporter pour utilisation ailleurs
   app.locals.sendRealTimeNotification = sendRealTimeNotification;
   
   logger.info('🔗 WebSocket pour notifications activé');
 } catch (error) {
   logger.warn('⚠️ WebSocket non disponible, notifications en temps réel désactivées');
 }
-
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
