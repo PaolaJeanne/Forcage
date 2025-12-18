@@ -1,36 +1,82 @@
-// middleware/auth.middleware.js - Version optimisée
+// middleware/auth.middleware.js - VERSION AVEC LOGS DÉTAILLÉS
 const { verifyToken, getUserFromToken } = require('../utils/jwt.util');
 const { errorResponse } = require('../utils/response.util');
 
 const authenticate = async (req, res, next) => {
+  console.log('\n🔐 ===== AUTHENTICATE MIDDLEWARE DÉBUT =====');
+  console.log('📍 URL:', req.url);
+  console.log('📝 Méthode:', req.method);
+  console.log('⏰ Heure:', new Date().toISOString());
+  
   try {
     const authHeader = req.headers.authorization;
+    console.log('🔑 Authorization Header:', authHeader || 'NON PRÉSENT');
     
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!authHeader) {
+      console.log('❌ ERREUR: Pas de header Authorization');
       return errorResponse(res, 401, 'Token manquant');
     }
     
-    const token = authHeader.substring(7);
+    if (!authHeader.startsWith('Bearer ')) {
+      console.log('❌ ERREUR: Mauvais format. Doit commencer par "Bearer "');
+      console.log('   Reçu:', authHeader.substring(0, 50) + '...');
+      return errorResponse(res, 401, 'Format token invalide');
+    }
     
-    // OPTIMISATION: Récupérer directement depuis le token
+    const token = authHeader.substring(7);
+    console.log('🎫 Token extrait (longueur):', token.length, 'caractères');
+    console.log('🎫 Token preview:', token.substring(0, 30) + '...');
+    
+    if (!token || token === '') {
+      console.log('❌ ERREUR: Token vide après Bearer');
+      return errorResponse(res, 401, 'Token vide');
+    }
+    
+    console.log('🔍 Appel de getUserFromToken...');
     const user = getUserFromToken(token);
     
     if (!user) {
+      console.log('❌ ERREUR: getUserFromToken retourne null/undefined');
+      console.log('💡 Causes possibles:');
+      console.log('   1. Token expiré');
+      console.log('   2. Mauvais JWT_SECRET');
+      console.log('   3. Signature invalide');
+      console.log('   4. Token mal formé');
       return errorResponse(res, 401, 'Token invalide ou expiré');
     }
     
+    console.log('✅ SUCCÈS: Token valide!');
+    console.log('👤 User object:', {
+      id: user.id,
+      userId: user.userId,
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive
+    });
+    
     if (!user.isActive) {
+      console.log('❌ ERREUR: Compte désactivé');
       return errorResponse(res, 401, 'Compte désactivé');
+    }
+    
+    // Vérifier que l'ID est présent
+    if (!user.id && !user.userId) {
+      console.log('❌ ERREUR: Token ne contient pas d\'ID utilisateur');
+      return errorResponse(res, 401, 'Token mal formé');
     }
     
     // Ajouter l'utilisateur à la requête
     req.user = user;
-    req.userId = user.id;
+    req.userId = user.id || user.userId;
     req.userRole = user.role;
     req.token = token;
     
+    console.log('🔐 ===== AUTHENTICATE MIDDLEWARE FIN =====\n');
     next();
+    
   } catch (error) {
+    console.error('🔥 ERREUR CRITIQUE dans authenticate:', error.message);
+    console.error('🔥 Stack:', error.stack);
     return errorResponse(res, 401, 'Token invalide ou expiré');
   }
 };
@@ -183,15 +229,76 @@ const requireConseiller = authorize('conseiller');
 const requireClient = authorize('client');
 
 // Middleware pour vérifier la limite d'autorisation
+// Middleware pour vérifier la limite d'autorisation - VERSION CORRIGÉE
 const canAuthorize = (req, res, next) => {
-  const montant = req.body.montant || req.body.montantAutorise;
+  console.log('\n💰 ===== CAN AUTHORIZE MIDDLEWARE =====');
+  console.log('📍 URL:', req.url);
+  console.log('📝 Méthode:', req.method);
+  console.log('📦 Body:', req.body);
   
-  if (!montant) {
-    return errorResponse(res, 400, 'Montant requis');
+  // Actions qui nécessitent un montant
+  const actionsRequiringAmount = ['AUTORISER', 'APPROUVER', 'ACCORDER', 'VALIDER_AVEC_MONTANT'];
+  
+  // Actions qui ne nécessitent PAS de montant
+  const actionsWithoutAmount = ['VALIDER', 'REJETER', 'RETOURNER', 'ANNULER', 'ETUDIER', 'PRENDRE_EN_CHARGE'];
+  
+  const { action } = req.body;
+  
+  // Si pas d'action spécifiée, vérifier s'il y a un montant
+  if (!action) {
+    console.log('⚠️  Pas d\'action spécifiée, vérification du montant...');
+    const montant = req.body.montant || req.body.montantAutorise;
+    
+    if (montant) {
+      console.log('💰 Montant trouvé:', montant);
+      return checkAmountLimit(req, res, next, montant);
+    } else {
+      console.log('✅ Pas de montant, passage autorisé');
+      return next();
+    }
   }
   
-  // OPTIMISATION: limiteAutorisation est déjà dans req.user depuis le token
+  // Si c'est une action qui nécessite un montant
+  if (actionsRequiringAmount.includes(action)) {
+    console.log(`🔍 Action "${action}" nécessite un montant`);
+    const montant = req.body.montant || req.body.montantAutorise;
+    
+    if (!montant) {
+      console.log('❌ ERREUR: Montant requis pour l\'action', action);
+      return errorResponse(res, 400, `Montant requis pour l'action "${action}"`);
+    }
+    
+    return checkAmountLimit(req, res, next, montant);
+  }
+  
+  // Si c'est une action qui ne nécessite PAS de montant
+  if (actionsWithoutAmount.includes(action)) {
+    console.log(`✅ Action "${action}" ne nécessite pas de montant`);
+    return next();
+  }
+  
+  // Action non reconnue - vérifier s'il y a un montant
+  console.log(`⚠️  Action "${action}" non reconnue, vérification conditionnelle`);
+  const montant = req.body.montant || req.body.montantAutorise;
+  
+  if (montant) {
+    console.log('💰 Montant trouvé, vérification des limites');
+    return checkAmountLimit(req, res, next, montant);
+  }
+  
+  console.log('✅ Pas de montant, passage autorisé');
+  next();
+};
+
+// Fonction helper pour vérifier la limite
+function checkAmountLimit(req, res, next, montant) {
+  console.log('🔍 Vérification limite d\'autorisation...');
+  console.log('   User limite:', req.user.limiteAutorisation);
+  console.log('   Montant demandé:', montant);
+  console.log('   Role:', req.user.role);
+  
   if (req.user.limiteAutorisation < montant && req.user.role !== 'admin') {
+    console.log(`❌ ERREUR: Limite dépassée (${montant} > ${req.user.limiteAutorisation})`);
     return errorResponse(
       res, 
       403, 
@@ -199,8 +306,9 @@ const canAuthorize = (req, res, next) => {
     );
   }
   
+  console.log('✅ Limite OK');
   next();
-};
+}
 
 // Vérifier si l'utilisateur est dans la même agence
 const sameAgency = async (req, res, next) => {

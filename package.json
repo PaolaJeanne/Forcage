@@ -5,7 +5,10 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "clean-admin": "node src/scripts/createCleanAdmin.js"
+    "clean-admin": "node src/scripts/createCleanAdmin.js",
+      "clean:db": "node scripts/cleanDatabase.js",
+      "token:generate": "node scripts/generateToken.js"
+
   },
   "keywords": [
     "express",

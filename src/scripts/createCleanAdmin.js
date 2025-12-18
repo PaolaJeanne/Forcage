@@ -16,7 +16,7 @@ const createCleanAdmin = async () => {
     // 1. Supprimer tous les anciens admins
     await usersCollection.deleteMany({ 
       $or: [
-        { email: 'admin@bank.cm' },
+        { email: 'admin@gmail.com' },
         { role: 'admin' }
       ]
     });
@@ -37,7 +37,7 @@ const createCleanAdmin = async () => {
     const adminDoc = {
       nom: 'Admin',
       prenom: 'System',
-      email: 'admin@bank.cm',
+      email: 'admin@gmail.com',
       password: hashedPassword,
       telephone: '+237600000000',
       numeroCompte: 'ADMIN001',
@@ -62,7 +62,7 @@ const createCleanAdmin = async () => {
     
     // 4. Vérifier IMMÉDIATEMENT avec bcrypt
     console.log('🧪 Vérification immédiate:');
-    const insertedAdmin = await usersCollection.findOne({ email: 'admin@bank.cm' });
+    const insertedAdmin = await usersCollection.findOne({ email: 'admin@gmail.com' });
     
     if (!insertedAdmin) {
       console.log('❌ Admin non trouvé après insertion');
@@ -75,7 +75,7 @@ const createCleanAdmin = async () => {
     // 5. Vérifier aussi avec la méthode du modèle
     console.log('\n🧪 Test avec modèle Mongoose:');
     const User = require('../models/User');
-    const mongooseAdmin = await User.findOne({ email: 'admin@bank.cm' }).select('+password');
+    const mongooseAdmin = await User.findOne({ email: 'admin@gmail.com' }).select('+password');
     
     if (mongooseAdmin) {
       const modelIsValid = await mongooseAdmin.comparePassword(password);
@@ -85,7 +85,7 @@ const createCleanAdmin = async () => {
     if (isValid) {
       console.log('\n🎉 ADMIN BCrypt PRÊT !');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('   Email:    admin@bank.cm');
+      console.log('   Email:    admin@gmail.com');
       console.log('   Password: Admin123!@#');
       console.log('   Bcrypt:   ✅ 100% fonctionnel');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -94,7 +94,7 @@ const createCleanAdmin = async () => {
       console.log(`
 curl -X POST http://localhost:3000/api/v1/auth/login \\
   -H "Content-Type: application/json" \\
-  -d '{"email":"admin@bank.cm","password":"Admin123!@#"}'
+  -d '{"email":"admin@gmail.com","password":"Admin123!@#"}'
       `);
     }
     

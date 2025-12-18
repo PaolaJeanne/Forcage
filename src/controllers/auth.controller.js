@@ -1,12 +1,12 @@
-// ============================================
-// CONTROLLER AUTH OPTIMISÉ - src/controllers/auth.controller.js
-// ============================================
+// src/controllers/auth.controller.js
 const User = require('../models/User');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt.util');
 const { successResponse, errorResponse } = require('../utils/response.util');
 const logger = require('../utils/logger');
 
-// ⚠️ INSCRIPTION - ROLE CLIENT FORCÉ
+// ============================================
+// INSCRIPTION - Retourne uniquement l'utilisateur
+// ============================================
 const register = async (req, res) => {
   try {
     const { nom, prenom, email, password, telephone, numeroCompte } = req.body;
@@ -25,7 +25,7 @@ const register = async (req, res) => {
       return errorResponse(res, 400, 'Cet email est déjà utilisé');
     }
     
-    // ⚠️ SÉCURITÉ: Rôle client forcé, on ignore req.body.role
+    // Rôle client forcé
     const user = new User({
       nom,
       prenom,
@@ -44,18 +44,7 @@ const register = async (req, res) => {
     
     logger.info(`Nouvel utilisateur: ${email} (role: client)`);
     
-    // OPTIMISATION: Générer token avec plus d'infos
-    const token = generateToken({ 
-      userId: user._id, 
-      email: user.email, 
-      role: user.role,
-      nom: user.nom,
-      prenom: user.prenom
-    });
-    
-    const refreshToken = generateRefreshToken({ userId: user._id });
-    
-    // OPTIMISATION: Réponse légère - seulement l'essentiel
+    // OPTIMISATION: À l'inscription, on ne retourne QUE l'utilisateur
     return successResponse(res, 201, 'Inscription réussie', {
       user: {
         id: user._id,
@@ -65,9 +54,8 @@ const register = async (req, res) => {
         role: user.role,
         telephone: user.telephone,
         numeroCompte: user.numeroCompte
-      },
-      token,
-      refreshToken
+      }
+      // PAS de token ni refreshToken ici
     });
     
   } catch (error) {
@@ -76,6 +64,9 @@ const register = async (req, res) => {
   }
 };
 
+// ============================================
+// CONNEXION - Retourne uniquement les tokens
+// ============================================
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -84,7 +75,6 @@ const login = async (req, res) => {
       return errorResponse(res, 400, 'Email et mot de passe requis');
     }
     
-    // OPTIMISATION: Utiliser la méthode statique du modèle
     const user = await User.findByEmailWithPassword(email);
     
     if (!user) {
@@ -101,13 +91,13 @@ const login = async (req, res) => {
       return errorResponse(res, 401, 'Email ou mot de passe incorrect');
     }
     
-    // Mettre à jour lastLogin sans déclencher le middleware
+    // Mettre à jour lastLogin
     await User.updateOne(
       { _id: user._id },
       { $set: { lastLogin: new Date() } }
     );
     
-    // OPTIMISATION: Générer token avec toutes les infos nécessaires
+    // Générer tokens
     const token = generateToken({ 
       userId: user._id, 
       email: user.email, 
@@ -123,22 +113,11 @@ const login = async (req, res) => {
     
     logger.info(`Connexion: ${email} (role: ${user.role})`);
     
-    // OPTIMISATION: Réponse légère - le token contient déjà nom, prenom, role, etc.
+    // OPTIMISATION: À la connexion, on ne retourne QUE les tokens
     return successResponse(res, 200, 'Connexion réussie', {
-      user: {
-        id: user._id,
-        email: user.email,
-        nom: user.nom,
-        prenom: user.prenom,
-        role: user.role,
-        // Seulement ce qui n'est pas dans le token
-        telephone: user.telephone,
-        numeroCompte: user.numeroCompte,
-        agence: user.agence,
-        limiteAutorisation: user.limiteAutorisation
-      },
       token,
       refreshToken
+      // PAS d'infos utilisateur ici
     });
     
   } catch (error) {
@@ -147,45 +126,12 @@ const login = async (req, res) => {
   }
 };
 
-const refreshToken = async (req, res) => {
-  try {
-    const { refreshToken } = req.body;
-    
-    if (!refreshToken) {
-      return errorResponse(res, 400, 'Refresh token requis');
-    }
-    
-    const decoded = verifyRefreshToken(refreshToken);
-    const user = await User.findById(decoded.userId);
-    
-    if (!user || !user.isActive) {
-      return errorResponse(res, 401, 'Utilisateur non trouvé ou inactif');
-    }
-    
-    // OPTIMISATION: Générer nouveau token avec toutes les infos
-    const newToken = generateToken({ 
-      userId: user._id, 
-      email: user.email, 
-      role: user.role,
-      nom: user.nom,
-      prenom: user.prenom,
-      limiteAutorisation: user.limiteAutorisation,
-      agence: user.agence,
-      isActive: user.isActive
-    });
-    
-    return successResponse(res, 200, 'Token rafraîchi', {
-      token: newToken
-    });
-    
-  } catch (error) {
-    return errorResponse(res, 401, 'Refresh token invalide');
-  }
-};
-
+// ============================================
+// GET PROFILE - Pour récupérer les infos utilisateur
+// ============================================
 const getProfile = async (req, res) => {
   try {
-    // OPTIMISATION: Récupérer seulement les infos non présentes dans le token
+    // Récupérer les infos complètes de l'utilisateur
     const user = await User.findById(req.userId)
       .select('telephone numeroCompte classification notationClient kycValide dateKyc listeSMP soldeActuel decouvertAutorise');
     
@@ -193,10 +139,9 @@ const getProfile = async (req, res) => {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
     
-    // OPTIMISATION: Combiner les infos du token (req.user) avec celles de la DB
+    // Retourner toutes les infos utilisateur
     return successResponse(res, 200, 'Profil récupéré', {
       user: {
-        // Depuis le token (déjà dans req.user si middleware optimisé)
         id: req.userId,
         email: req.user?.email || user.email,
         nom: req.user?.nom || user.nom,
@@ -204,7 +149,6 @@ const getProfile = async (req, res) => {
         role: req.user?.role || user.role,
         agence: req.user?.agence || user.agence,
         limiteAutorisation: req.user?.limiteAutorisation || user.limiteAutorisation,
-        // Depuis la base de données
         telephone: user.telephone,
         numeroCompte: user.numeroCompte,
         classification: user.classification,
@@ -225,6 +169,44 @@ const getProfile = async (req, res) => {
   }
 };
 
+// ============================================
+// REMAINING FUNCTIONS (unchanged)
+// ============================================
+const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return errorResponse(res, 400, 'Refresh token requis');
+    }
+    
+    const decoded = verifyRefreshToken(refreshToken);
+    const user = await User.findById(decoded.userId);
+    
+    if (!user || !user.isActive) {
+      return errorResponse(res, 401, 'Utilisateur non trouvé ou inactif');
+    }
+    
+    const newToken = generateToken({ 
+      userId: user._id, 
+      email: user.email, 
+      role: user.role,
+      nom: user.nom,
+      prenom: user.prenom,
+      limiteAutorisation: user.limiteAutorisation,
+      agence: user.agence,
+      isActive: user.isActive
+    });
+    
+    return successResponse(res, 200, 'Token rafraîchi', {
+      token: newToken
+    });
+    
+  } catch (error) {
+    return errorResponse(res, 401, 'Refresh token invalide');
+  }
+};
+
 const updateProfile = async (req, res) => {
   try {
     const { nom, prenom, telephone } = req.body;
@@ -235,7 +217,6 @@ const updateProfile = async (req, res) => {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
     
-    // Mettre à jour
     if (nom) user.nom = nom;
     if (prenom) user.prenom = prenom;
     if (telephone) user.telephone = telephone;
@@ -244,7 +225,6 @@ const updateProfile = async (req, res) => {
     
     logger.info(`Profil mis à jour: ${user.email}`);
     
-    // OPTIMISATION: Réponse légère après mise à jour
     return successResponse(res, 200, 'Profil mis à jour', {
       user: {
         id: user._id,
@@ -291,7 +271,6 @@ const changePassword = async (req, res) => {
     
     logger.info(`Mot de passe changé: ${user.email}`);
     
-    // OPTIMISATION: Générer un nouveau token après changement de mot de passe
     const newToken = generateToken({ 
       userId: user._id, 
       email: user.email, 
