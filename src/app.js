@@ -1,4 +1,4 @@
-// app.js - VERSION CORRIGÉE
+// app.js - VERSION CORRIGÉE AVEC CHEMINS RELATIFS
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -6,29 +6,99 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const compression = require('compression');
 const path = require('path');
+const http = require('http');
+const socketIo = require('socket.io');
+const cron = require('node-cron');
+
 const config = require('./config/env');
 const logger = require('./utils/logger');
 const { errorHandler, notFound } = require('./middlewares/errorHandler');
 const connectDB = require('./config/database');
 
 const app = express();
+const server = http.createServer(app);
+
+// ==========================================
+// Vérification des chemins de fichiers
+// ==========================================
+console.log('📁 Dossier courant:', __dirname);
+console.log('📁 Contenu du dossier routes:');
+const fs = require('fs');
+try {
+  const routesDir = path.join(__dirname, 'routes');
+  if (fs.existsSync(routesDir)) {
+    const files = fs.readdirSync(routesDir);
+    console.log('Fichiers trouvés dans routes/:', files);
+  } else {
+    console.log('❌ Dossier routes/ non trouvé, création...');
+    fs.mkdirSync(routesDir, { recursive: true });
+  }
+} catch (error) {
+  console.log('❌ Erreur vérification dossier routes:', error.message);
+}
+
+// ==========================================
+// Configuration WebSocket
+// ==========================================
+const io = socketIo(server, {
+  cors: {
+    origin: config.env === 'production' 
+      ? ['https://votre-domaine.com', 'https://www.votre-domaine.com'] 
+      : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
+  },
+  transports: ['websocket', 'polling']
+});
+
+// Stocker l'instance io globalement pour les services
+global.io = io;
 
 // ==========================================
 // Connexion à MongoDB
 // ==========================================
-connectDB();
-// app.js
-const NotificationTemplateService = require('./services/notificationTemplate.service');
-
 connectDB().then(async () => {
-  // Initialiser les templates
-  await NotificationTemplateService.initialiserTemplatesParDefaut();
-  logger.info('✅ Templates de notifications initialisés');
+  logger.info('✅ Base de données connectée');
+  
+  // Initialiser les templates de notifications
+  try {
+    const NotificationTemplateService = require('./services/notificationTemplate.service');
+    await NotificationTemplateService.initialiserTemplatesParDefaut();
+    logger.info('✅ Templates de notifications initialisés');
+  } catch (error) {
+    logger.warn('⚠️ Templates de notifications non initialisés:', error.message);
+  }
+  
+  // Configurer les hooks de notifications
+  try {
+    const { setupDemandeHooks } = require('./hooks/notification.hooks');
+    const DemandeForçage = require('./models/DemandeForçage');
+    
+    setupDemandeHooks(DemandeForçage);
+    logger.info('✅ Hooks de notifications configurés');
+  } catch (error) {
+    logger.warn('⚠️ Hooks de notifications non configurés:', error.message);
+  }
+}).catch(err => {
+  logger.error('❌ Erreur connexion base de données:', err);
+  process.exit(1);
 });
+
 // ==========================================
 // Middlewares de Sécurité
 // ==========================================
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "ws:", "wss:"]
+    }
+  }
+}));
+
 app.use(cors({
   origin: config.env === 'production' 
     ? ['https://votre-domaine.com', 'https://www.votre-domaine.com'] 
@@ -41,7 +111,7 @@ app.use(cors({
 // Rate limiting
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -52,7 +122,7 @@ const apiLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 10,
   message: {
     success: false,
     message: 'Trop de tentatives de connexion, veuillez réessayer dans 15 minutes.'
@@ -66,8 +136,8 @@ app.use('/api/v1/auth/register', authLimiter);
 // ==========================================
 // Middlewares de parsing
 // ==========================================
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ==========================================
 // Logging HTTP & Compression
@@ -75,84 +145,144 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 if (config.env === 'development') {
   app.use(morgan('dev'));
 } else {
-  app.use(morgan('combined'));
+  app.use(morgan('combined', {
+    stream: {
+      write: message => logger.info(message.trim())
+    }
+  }));
 }
 
 app.use(compression());
 
 // ==========================================
-// ROUTE DE TEST DU MIDDLEWARE - AJOUTEZ CE BLOOC
+// WebSocket Initialisation
 // ==========================================
-console.log('🔍 [APP] Création route de test...');
-const { autoNotify: testAutoNotify } = require('./middlewares/notification.middleware');
-
-app.get('/api/test-notification',
-  (req, res, next) => {
-    // Simuler un utilisateur
-    req.user = { 
-      id: '693fe20c884cfd7aaefc827e',
-      email: 'test@example.com',
-      role: 'client'
-    };
-    console.log('🧪 [TEST] Utilisateur simulé:', req.user.id);
-    next();
-  },
-  testAutoNotify('test_event', 'test'),
-  (req, res) => {
-    console.log('🧪 [TEST] Contrôleur exécuté');
-    res.status(201).json({
-      success: true,
-      message: 'Test de notification réussi',
-      data: { 
-        _id: 'test123',
-        numero: 'TEST-001',
-        montant: 5000
-      }
-    });
-  }
-);
-
-console.log('🔍 [APP] Route de test créée: GET /api/test-notification');
+// Connexion globale Socket.IO
+io.on('connection', (socket) => {
+  logger.info(`🔗 Nouvelle connexion Socket.IO: ${socket.id}`);
+  
+  socket.on('disconnect', (reason) => {
+    logger.info(`🔗 Déconnexion Socket.IO: ${socket.id}, raison: ${reason}`);
+  });
+});
 
 // ==========================================
-// Servir les fichiers statiques (uploads)
+// TEST SIMPLE POUR DÉMARRER
 // ==========================================
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.get('/api/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'API fonctionnelle',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // ==========================================
-// Routes de test
+// Servir les fichiers statiques
+// ==========================================
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
+// ==========================================
+// Routes de base
 // ==========================================
 app.get('/', (req, res) => {
   res.json({
     message: 'API Backend Forçage Bancaire',
-    version: '1.0.0',
+    version: '2.0.0',
     status: 'running',
     environment: config.env,
     timestamp: new Date().toISOString(),
-    database: 'MongoDB'
+    endpoints: {
+      test: '/api/test',
+      health: '/health',
+      api_docs: '/api-docs'
+    }
   });
 });
 
 app.get('/health', (req, res) => {
+  const mongoose = require('mongoose');
+  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  
   res.json({
     status: 'OK',
     message: 'Backend Forçage Bancaire opérationnel',
     timestamp: new Date().toISOString(),
     environment: config.env,
-    database: 'connected'
+    database: dbStatus,
+    websocket: io.engine.clientsCount > 0 ? 'active' : 'idle'
   });
 });
 
 // ==========================================
-// Routes API
+// Routes API - CHARGEMENT CONDITIONNEL
 // ==========================================
-app.use('/api/v1/auth', require('./routes/auth.routes'));
-app.use('/api/v1/demandes', require('./routes/demandeForçage.routes'));
-app.use('/api/v1/admin', require('./routes/admin.routes'));
-app.use('/api/v1/documents', require('./routes/document.routes'));
-app.use('/api/v1/audit', require('./routes/audit.routes')); 
-app.use('/api/v1/notifications', require('./routes/notification.routes'));
-// app.use('/api/v1/dashboard', require('./routes/dashboard.routes'));
+console.log('📁 Chargement des routes...');
+
+// Fonction pour charger une route avec gestion d'erreur
+function loadRoute(routePath, routeName) {
+  try {
+    if (fs.existsSync(path.join(__dirname, routePath + '.js')) || 
+        fs.existsSync(path.join(__dirname, routePath + '/index.js'))) {
+      const route = require(routePath);
+      console.log(`✅ Route chargée: ${routeName}`);
+      return route;
+    } else {
+      console.log(`⚠️ Route non trouvée: ${routeName} (${routePath})`);
+      return null;
+    }
+  } catch (error) {
+    console.log(`❌ Erreur chargement route ${routeName}:`, error.message);
+    return null;
+  }
+}
+
+// Charger les routes disponibles
+const routes = [
+  { path: './routes/auth.routes', name: 'Auth', mount: '/api/v1/auth' },
+  { path: './routes/demandeForçage.routes', name: 'Demandes', mount: '/api/v1/demandes' },
+  { path: './routes/admin.routes', name: 'Admin', mount: '/api/v1/admin' },
+  { path: './routes/document.routes', name: 'Documents', mount: '/api/v1/documents' },
+  { path: './routes/audit.routes', name: 'Audit', mount: '/api/v1/audit' },
+  { path: './routes/dashboard.routes', name: 'Dashboard', mount: '/api/v1/dashboard' },
+  { path: './routes/notification.routes', name: 'Notifications', mount: '/api/v1/notifications' },
+  { path: './routes/chat.routes', name: 'Chat', mount: '/api/v1/chat' }
+];
+
+routes.forEach(route => {
+  const routeModule = loadRoute(route.path, route.name);
+  if (routeModule) {
+    app.use(route.mount, routeModule);
+  }
+});
+
+// ==========================================
+// Routes API WebSocket (chargées après vérification)
+// ==========================================
+setTimeout(() => {
+  try {
+    // WebSocket pour les notifications
+    if (fs.existsSync(path.join(__dirname, 'websocket/notification.socket.js'))) {
+      const notificationSocket = require('./websocket/notification.socket');
+      notificationSocket(io);
+      logger.info('🔔 WebSocket notifications activé');
+    } else {
+      logger.warn('⚠️ WebSocket notifications non trouvé');
+    }
+
+    // WebSocket pour le chat
+    if (fs.existsSync(path.join(__dirname, 'websocket/chat.socket.js'))) {
+      const chatSocket = require('./websocket/chat.socket');
+      chatSocket(io);
+      logger.info('💬 WebSocket chat activé');
+    } else {
+      logger.warn('⚠️ WebSocket chat non trouvé');
+    }
+  } catch (error) {
+    logger.warn('⚠️ Erreur initialisation WebSocket:', error.message);
+  }
+}, 1000); // Attendre 1 seconde pour être sûr que tout est chargé
 
 // ==========================================
 // Gestion des erreurs 404 & Erreurs globales
@@ -175,34 +305,46 @@ process.on('uncaughtException', (err) => {
 // ==========================================
 // Démarrage du serveur
 // ==========================================
-const server = app.listen(config.port, () => {
-  logger.info(`🚀 Serveur démarré sur le port ${config.port}`);
+const PORT = config.port || 5000;
+server.listen(PORT, () => {
+  logger.info(`🚀 Serveur démarré sur le port ${PORT}`);
   logger.info(`📍 Environment: ${config.env}`);
-  logger.info(`🔗 URL: http://localhost:${config.port}`);
-  logger.info(`🗄️  Base de données: MongoDB`);
+  logger.info(`🔗 API: http://localhost:${PORT}`);
+  logger.info(`🔗 WebSocket: ws://localhost:${PORT}`);
+  logger.info(`📡 Routes chargées: ${routes.filter(r => loadRoute(r.path, r.name)).length}/${routes.length}`);
 });
 
 // ==========================================
-// WebSocket pour notifications (optionnel)
-// ==========================================
-try {
-  const setupNotificationWebSocket = require('./websocket/notification.socket');
-  const { sendRealTimeNotification } = setupNotificationWebSocket(server);
-  
-  app.locals.sendRealTimeNotification = sendRealTimeNotification;
-  
-  logger.info('🔗 WebSocket pour notifications activé');
-} catch (error) {
-  logger.warn('⚠️ WebSocket non disponible, notifications en temps réel désactivées');
-}
-
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM reçu. Arrêt gracieux du serveur...');
-  server.close(() => {
-    logger.info('Serveur arrêté.');
-    process.exit(0);
+// ==========================================
+const shutdown = (signal) => {
+  logger.info(`${signal} reçu. Arrêt gracieux du serveur...`);
+  
+  // Fermer les connexions WebSocket
+  io.close(() => {
+    logger.info('🔌 WebSocket fermé');
   });
-});
+  
+  // Fermer le serveur HTTP
+  server.close(() => {
+    logger.info('🛑 Serveur HTTP fermé');
+    
+    // Fermer la connexion MongoDB
+    const mongoose = require('mongoose');
+    mongoose.connection.close(false, () => {
+      logger.info('🗄️  Connexion MongoDB fermée');
+      process.exit(0);
+    });
+  });
+  
+  // Timeout forcé après 10 secondes
+  setTimeout(() => {
+    logger.error('❌ Timeout graceful shutdown, arrêt forcé');
+    process.exit(1);
+  }, 10000);
+};
 
-module.exports = app;
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+module.exports = { app, server, io };

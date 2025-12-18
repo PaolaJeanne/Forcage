@@ -1,38 +1,71 @@
-// src/controllers/notification.controller.js
 const NotificationService = require('../services/notification.service');
-const { successResponse, errorResponse } = require('../utils/response.util');
+const { validationResult } = require('express-validator');
 
 class NotificationController {
   
   /**
-   * Récupérer les notifications de l'utilisateur
+   * Récupérer les notifications
    */
   static async getNotifications(req, res) {
     try {
-      const { 
-        page = 1, 
-        limit = 20, 
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array()
+        });
+      }
+      
+      const {
+        page = 1,
+        limit = 50,
         unreadOnly = false,
-        type 
+        entite = null,
+        categorie = null,
+        priorite = null
       } = req.query;
       
-      const options = {
+      const result = await NotificationService.getUserNotifications(req.user.id, {
         page: parseInt(page),
         limit: parseInt(limit),
-        unreadOnly: unreadOnly === 'true'
-      };
+        unreadOnly: unreadOnly === 'true',
+        entite,
+        categorie,
+        priorite
+      });
       
-      if (type) options.type = type;
-      
-      const result = await NotificationService.getUserNotifications(
-        req.user.id,
-        options
-      );
-      
-      return successResponse(res, 200, 'Notifications récupérées', result);
+      res.json({
+        success: true,
+        data: result
+      });
       
     } catch (error) {
-      return errorResponse(res, 500, 'Erreur récupération notifications', error.message);
+      console.error('❌ Erreur récupération notifications:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des notifications'
+      });
+    }
+  }
+  
+  /**
+   * Récupérer le compteur de notifications non lues
+   */
+  static async getUnreadCount(req, res) {
+    try {
+      const count = await NotificationService.getUnreadCount(req.user.id);
+      
+      res.json({
+        success: true,
+        data: { count }
+      });
+      
+    } catch (error) {
+      console.error('❌ Erreur récupération compteur:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération du compteur'
+      });
     }
   }
   
@@ -45,10 +78,25 @@ class NotificationController {
       
       const notification = await NotificationService.markAsRead(notificationId, req.user.id);
       
-      return successResponse(res, 200, 'Notification marquée comme lue', { notification });
+      res.json({
+        success: true,
+        data: notification
+      });
       
     } catch (error) {
-      return errorResponse(res, 400, error.message);
+      console.error('❌ Erreur marquage notification:', error);
+      
+      if (error.message.includes('non trouvée')) {
+        return res.status(404).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        message: 'Erreur lors du marquage de la notification'
+      });
     }
   }
   
@@ -57,31 +105,24 @@ class NotificationController {
    */
   static async markAllAsRead(req, res) {
     try {
-      const count = await NotificationService.markAllAsRead(req.user.id);
+      const { categorie, entite } = req.query;
       
-      return successResponse(res, 200, `${count} notifications marquées comme lues`, { count });
-      
-    } catch (error) {
-      return errorResponse(res, 500, 'Erreur mise à jour notifications', error.message);
-    }
-  }
-  
-  /**
-   * Compter les notifications non lues
-   */
-  static async getUnreadCount(req, res) {
-    try {
-      const result = await NotificationService.getUserNotifications(req.user.id, {
-        limit: 1,
-        unreadOnly: true
+      const result = await NotificationService.markAllAsRead(req.user.id, {
+        categorie,
+        entite
       });
       
-      return successResponse(res, 200, 'Nombre de notifications non lues', {
-        unreadCount: result.pagination.total
+      res.json({
+        success: true,
+        data: result
       });
       
     } catch (error) {
-      return errorResponse(res, 500, 'Erreur comptage notifications', error.message);
+      console.error('❌ Erreur marquage toutes notifications:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erreur lors du marquage des notifications'
+      });
     }
   }
   
@@ -92,20 +133,161 @@ class NotificationController {
     try {
       const { notificationId } = req.params;
       
+      const result = await NotificationService.deleteNotification(notificationId, req.user.id);
+      
+      res.json({
+        success: true,
+        data: result
+      });
+      
+    } catch (error) {
+      console.error('❌ Erreur suppression notification:', error);
+      
+      if (error.message.includes('non trouvée')) {
+        return res.status(404).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la suppression de la notification'
+      });
+    }
+  }
+  
+  /**
+   * Créer une notification (admin)
+   */
+  static async createNotification(req, res) {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array()
+        });
+      }
+      
+      // Vérifier permissions admin
+      if (!['admin', 'dga'].includes(req.user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Permission refusée'
+        });
+      }
+      
+      const {
+        utilisateur,
+        titre,
+        message,
+        entite = 'other',
+        entiteId = null,
+        type = 'info',
+        priorite = 'normale',
+        categorie = 'other',
+        action = 'view',
+        lien = null,
+        metadata = {},
+        tags = []
+      } = req.body;
+      
+      const notification = await NotificationService.createNotification({
+        utilisateur,
+        titre,
+        message,
+        entite,
+        entiteId,
+        type,
+        priorite,
+        categorie,
+        action,
+        lien,
+        metadata: {
+          ...metadata,
+          adminCreated: true,
+          adminId: req.user.id
+        },
+        source: 'admin',
+        declencheur: req.user.id,
+        tags
+      });
+      
+      res.status(201).json({
+        success: true,
+        data: notification
+      });
+      
+    } catch (error) {
+      console.error('❌ Erreur création notification:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la création de la notification'
+      });
+    }
+  }
+  
+  /**
+   * Récupérer les statistiques
+   */
+  static async getStats(req, res) {
+    try {
       const Notification = require('../models/Notification');
-      const result = await Notification.deleteOne({
-        _id: notificationId,
+      
+      // Totaux
+      const totalReceived = await Notification.countDocuments({
         utilisateur: req.user.id
       });
       
-      if (result.deletedCount === 0) {
-        return errorResponse(res, 404, 'Notification non trouvée');
-      }
+      const totalRead = await Notification.countDocuments({
+        utilisateur: req.user.id,
+        lue: true
+      });
       
-      return successResponse(res, 200, 'Notification supprimée');
+      const totalUnread = await Notification.countDocuments({
+        utilisateur: req.user.id,
+        lue: false
+      });
+      
+      // Par catégorie
+      const byCategory = await Notification.aggregate([
+        { $match: { utilisateur: req.user.id } },
+        { $group: { _id: '$categorie', total: { $sum: 1 } } }
+      ]);
+      
+      // Par priorité
+      const byPriority = await Notification.aggregate([
+        { $match: { utilisateur: req.user.id } },
+        { $group: { _id: '$priorite', total: { $sum: 1 } } }
+      ]);
+      
+      res.json({
+        success: true,
+        data: {
+          totals: {
+            received: totalReceived,
+            read: totalRead,
+            unread: totalUnread,
+            readRate: totalReceived > 0 ? Math.round((totalRead / totalReceived) * 100) : 0
+          },
+          byCategory: byCategory.reduce((acc, item) => {
+            acc[item._id] = item.total;
+            return acc;
+          }, {}),
+          byPriority: byPriority.reduce((acc, item) => {
+            acc[item._id] = item.total;
+            return acc;
+          }, {})
+        }
+      });
       
     } catch (error) {
-      return errorResponse(res, 500, 'Erreur suppression notification', error.message);
+      console.error('❌ Erreur statistiques notifications:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des statistiques'
+      });
     }
   }
 }

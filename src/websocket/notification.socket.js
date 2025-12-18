@@ -1,77 +1,60 @@
-// src/websocket/notification.socket.js
-const WebSocket = require('ws');
-const NotificationService = require('../services/notification.service');
-
-function setupNotificationWebSocket(server) {
-  const wss = new WebSocket.Server({ server });
+module.exports = function(io) {
   
-  // Map pour stocker les connexions par utilisateur
-  const userConnections = new Map();
+  const notificationNamespace = io.of('/notifications');
   
-  wss.on('connection', (ws, req) => {
-    // Récupérer l'utilisateur depuis le token (simplifié)
-    const token = req.url.split('token=')[1];
-    if (!token) {
-      ws.close();
+  notificationNamespace.on('connection', (socket) => {
+    console.log('🔔 Nouvelle connexion notifications:', socket.id);
+    
+    const userId = socket.handshake.auth.userId || socket.handshake.query.userId;
+    
+    if (!userId) {
+      console.log('⚠️ Connexion sans userId');
+      socket.disconnect();
       return;
     }
     
-    const { getUserFromToken } = require('../utils/jwt.util');
-    const user = getUserFromToken(token);
+    // Rejoindre la room de l'utilisateur
+    socket.join(`user_${userId}`);
+    console.log(`👤 User ${userId} connecté aux notifications`);
     
-    if (!user) {
-      ws.close();
-      return;
-    }
-    
-    // Stocker la connexion
-    if (!userConnections.has(user.id)) {
-      userConnections.set(user.id, new Set());
-    }
-    userConnections.get(user.id).add(ws);
-    
-    console.log(`🔗 WebSocket connecté: ${user.email} (${userConnections.get(user.id).size} connexions)`);
-    
-    // Envoyer le nombre de notifications non lues
-    NotificationService.getUserNotifications(user.id, { 
-      limit: 1, 
-      unreadOnly: true 
-    }).then(result => {
-      ws.send(JSON.stringify({
-        type: 'unread_count',
-        count: result.pagination.total
-      }));
+    // Accusé de connexion
+    socket.emit('connected', {
+      message: 'Connecté aux notifications',
+      userId,
+      timestamp: new Date()
     });
     
-    ws.on('close', () => {
-      const userWsSet = userConnections.get(user.id);
-      if (userWsSet) {
-        userWsSet.delete(ws);
-        if (userWsSet.size === 0) {
-          userConnections.delete(user.id);
-        }
+    // Écouter les événements de lecture
+    socket.on('notification_read', async (data) => {
+      try {
+        const NotificationService = require('../services/notification.service');
+        await NotificationService.markAsRead(data.notificationId, userId);
+      } catch (error) {
+        console.error('❌ Erreur socket notification_read:', error);
       }
+    });
+    
+    // Écouter les demandes de comptage
+    socket.on('get_unread_count', async () => {
+      try {
+        const NotificationService = require('../services/notification.service');
+        const count = await NotificationService.getUnreadCount(userId);
+        
+        socket.emit('unread_count_update', {
+          count,
+          timestamp: new Date()
+        });
+      } catch (error) {
+        console.error('❌ Erreur socket get_unread_count:', error);
+      }
+    });
+    
+    // Déconnexion
+    socket.on('disconnect', () => {
+      console.log(`🔔 Déconnexion notifications: ${socket.id}`);
+      socket.leave(`user_${userId}`);
     });
   });
   
-  // Fonction pour envoyer une notification en temps réel
-  function sendRealTimeNotification(userId, notification) {
-    const userWsSet = userConnections.get(userId.toString());
-    if (userWsSet) {
-      const message = JSON.stringify({
-        type: 'new_notification',
-        notification
-      });
-      
-      userWsSet.forEach(ws => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(message);
-        }
-      });
-    }
-  }
-  
-  return { wss, sendRealTimeNotification };
-}
-
-module.exports = setupNotificationWebSocket;
+  return notificationNamespace;
+};

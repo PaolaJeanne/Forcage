@@ -1,73 +1,181 @@
-// src/middlewares/notification.middleware.js - VERSION GARANTIE
-console.log('🔔 [NOTIFICATION] Middleware notification.middleware.js CHARGÉ !');
+/**
+ * Middleware pour les notifications automatiques
+ * Version simplifiée et fonctionnelle
+ */
+
+const NotificationService = require('../services/notification.service');
 
 /**
- * Version ULTRA-SIMPLE de autoNotify qui fonctionne TOUJOURS
+ * Middleware autoNotify pour les notifications automatiques
+ * @param {string} eventType - Type d'événement (demande_created, demande_updated, etc.)
+ * @param {string} entityType - Type d'entité (demande, document, etc.)
+ * @returns {Function} Middleware Express
  */
-const autoNotify = (actionType, entityType) => {
-  console.log(`🔔 [FACTORY] autoNotify créé pour: ${actionType}`);
-  
+const autoNotify = (eventType, entityType = 'demande') => {
   return async (req, res, next) => {
-    console.log(`🔔 [${actionType}] MIDDLEWARE EXÉCUTÉ sur ${req.method} ${req.path}`);
-    
-    // Sauvegarder la fonction JSON originale
+    // Sauvegarder la fonction res.json originale
     const originalJson = res.json;
     
-    // Remplacer par notre version
-    res.json = function(data) {
-      console.log(`🔔 [${actionType}] INTERCEPTION - Status: ${res.statusCode}`);
-      
-      // 1. Envoyer la réponse d'abord
-      const result = originalJson.call(this, data);
-      
-      // 2. Notification en arrière-plan
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        console.log(`🔔 [${actionType}] Notification asynchrone démarrée`);
+    // Intercepter la réponse
+    res.json = async function(data) {
+      try {
+        // Restaurer la fonction originale
+        res.json = originalJson;
         
-        // Exécuter après l'envoi de la réponse
-        setTimeout(async () => {
-          try {
-            console.log(`🔔 [${actionType}] Création notification...`);
+        // Si la requête a réussi et qu'il y a des données
+        if (data && data.success && data.data && req.user) {
+          const entityId = data.data._id || data.data.id;
+          const entityData = data.data;
+          
+          if (entityId) {
+            console.log(`🔔 Événement ${eventType} sur ${entityType}: ${entityId}`);
             
-            // Vérifier que le modèle existe
-            let Notification;
-            try {
-              Notification = require('../models/Notification');
-            } catch (error) {
-              console.error('❌ Modèle Notification non trouvé');
-              return;
+            // Déterminer le type de notification
+            let notificationType = 'info';
+            let priority = 'normale';
+            let message = '';
+            let recipients = [];
+            
+            switch (eventType) {
+              case 'demande_creation':
+              case 'demande_created':
+                notificationType = 'success';
+                message = `Nouvelle demande créée`;
+                if (entityData.clientId) recipients.push(entityData.clientId);
+                if (entityData.conseillerId) recipients.push(entityData.conseillerId);
+                break;
+                
+              case 'demande_soumission':
+                message = `Demande soumise pour traitement`;
+                if (entityData.clientId) recipients.push(entityData.clientId);
+                if (entityData.conseillerId) recipients.push(entityData.conseillerId);
+                break;
+                
+              case 'demande_traitement':
+                notificationType = entityData.statut === 'validée' ? 'success' : 
+                                 entityData.statut === 'rejetée' ? 'error' : 'info';
+                message = `Demande traitée: ${entityData.statut}`;
+                if (entityData.clientId) recipients.push(entityData.clientId);
+                if (entityData.conseillerId) recipients.push(entityData.conseillerId);
+                break;
+                
+              case 'demande_annulation':
+                notificationType = 'warning';
+                message = `Demande annulée`;
+                if (entityData.clientId) recipients.push(entityData.clientId);
+                if (entityData.conseillerId) recipients.push(entityData.conseillerId);
+                break;
+                
+              case 'demande_modification':
+              case 'demande_updated':
+                message = `Demande mise à jour`;
+                if (entityData.clientId) recipients.push(entityData.clientId);
+                if (entityData.conseillerId) recipients.push(entityData.conseillerId);
+                break;
+                
+              case 'demande_remontee':
+                notificationType = 'urgent';
+                message = `Demande remontée`;
+                priority = 'haute';
+                // Notifier les responsables
+                recipients = ['admin', 'dga']; // À adapter
+                break;
+                
+              case 'demande_regularisation':
+                message = `Demande régularisée`;
+                if (entityData.clientId) recipients.push(entityData.clientId);
+                if (entityData.conseillerId) recipients.push(entityData.conseillerId);
+                break;
+                
+              default:
+                message = `Action ${eventType} effectuée`;
             }
             
-            // Créer une notification SIMPLE
-            const notificationData = {
-              utilisateur: req.user?.id || 'unknown',
-              type: 'info',
-              titre: `Notification ${actionType.replace('_', ' ')}`,
-              message: `Action ${actionType} effectuée sur ${req.path}`,
-              entite: entityType,
-              entiteId: data?.data?._id || req.params.id || null,
-              lien: req.path,
-              lue: false,
-              metadata: {
-                action: actionType,
-                timestamp: new Date().toISOString(),
-                user: req.user?.id
+            // Envoyer les notifications aux destinataires
+            if (recipients.length > 0) {
+              for (const recipient of recipients) {
+                try {
+                  // Si c'est un rôle, on récupère les utilisateurs avec ce rôle
+                  if (typeof recipient === 'string' && ['admin', 'dga', 'conseiller'].includes(recipient)) {
+                    const User = require('../models/User');
+                    const users = await User.find({ 
+                      role: recipient,
+                      actif: true 
+                    }).select('_id');
+                    
+                    for (const user of users) {
+                      await NotificationService.createNotification({
+                        utilisateur: user._id,
+                        titre: `📋 ${entityType.toUpperCase()} - ${eventType.replace('_', ' ')}`,
+                        message: entityData.numeroReference 
+                          ? `${message} #${entityData.numeroReference}`
+                          : message,
+                        entite: entityType,
+                        entiteId: entityId,
+                        type: notificationType,
+                        priorite: priority,
+                        categorie: entityType,
+                        action: 'view',
+                        lien: `/${entityType}s/${entityId}`,
+                        metadata: {
+                          eventType,
+                          entityId,
+                          entityData: {
+                            id: entityData._id,
+                            numeroReference: entityData.numeroReference,
+                            statut: entityData.statut,
+                            typeOperation: entityData.typeOperation,
+                            montant: entityData.montant
+                          },
+                          triggeredBy: req.user.id,
+                          timestamp: new Date()
+                        },
+                        source: 'system',
+                        declencheur: req.user.id,
+                        tags: [entityType, eventType, entityData.statut]
+                      });
+                    }
+                  } 
+                  // Si c'est un ID utilisateur
+                  else if (typeof recipient === 'object' || typeof recipient === 'string') {
+                    await NotificationService.createNotification({
+                      utilisateur: recipient,
+                      titre: `📋 ${entityType.toUpperCase()} - ${eventType.replace('_', ' ')}`,
+                      message: entityData.numeroReference 
+                        ? `${message} #${entityData.numeroReference}`
+                        : message,
+                      entite: entityType,
+                      entiteId: entityId,
+                      type: notificationType,
+                      priorite: priority,
+                      categorie: entityType,
+                      action: 'view',
+                      lien: `/${entityType}s/${entityId}`,
+                      metadata: {
+                        eventType,
+                        entityId,
+                        triggeredBy: req.user.id
+                      },
+                      source: 'system',
+                      declencheur: req.user.id,
+                      tags: [entityType, eventType]
+                    });
+                  }
+                } catch (notifError) {
+                  console.error(`❌ Erreur notification pour ${recipient}:`, notifError.message);
+                  // Continuer avec les autres destinataires
+                }
               }
-            };
-            
-            console.log('🔔 Données notification:', notificationData);
-            
-            const notification = await Notification.create(notificationData);
-            
-            console.log(`✅ [${actionType}] Notification CRÉÉE ! ID: ${notification._id}`);
-            
-          } catch (error) {
-            console.error(`❌ [${actionType}] ERREUR:`, error.message);
+            }
           }
-        }, 0);
+        }
+      } catch (error) {
+        console.error('❌ Erreur dans autoNotify:', error.message);
+        // Ne pas bloquer la réponse en cas d'erreur de notification
       }
       
-      return result;
+      // Envoyer la réponse originale
+      return originalJson.call(this, data);
     };
     
     next();
@@ -75,40 +183,123 @@ const autoNotify = (actionType, entityType) => {
 };
 
 /**
- * Middleware pour injecter les notifications dans les réponses
+ * Middleware pour les notifications de chat
  */
-const injectNotifications = (options = {}) => {
-  console.log('🔔 [INJECT] Factory injectNotifications créée');
-  
+const chatNotify = () => {
   return async (req, res, next) => {
-    if (!req.user || !req.user.id) {
-      return next();
-    }
-    
-    const originalJson = res.json.bind(res);
+    // Hook pour les messages de chat
+    const originalJson = res.json;
     
     res.json = async function(data) {
       try {
-        // Récupérer les notifications
-        const Notification = require('../models/Notification');
-        const notifications = await Notification.find({
-          utilisateur: req.user.id,
-          lue: false
-        }).limit(5).sort({ createdAt: -1 });
+        res.json = originalJson;
         
-        if (data && typeof data === 'object') {
-          data.notifications = {
-            unread: notifications,
-            unreadCount: notifications.length,
-            lastChecked: new Date()
-          };
+        if (data && data.success && data.data && req.user) {
+          const messageData = data.data;
+          
+          // Si c'est un message de chat
+          if (messageData.conversationId && messageData.sender) {
+            console.log(`💬 Notification chat: message ${messageData._id}`);
+            
+            // La notification sera gérée par le hook Message.post('save')
+            // via NotificationService.notifyNewMessage()
+          }
         }
       } catch (error) {
-        console.error('🔔 [INJECT] Erreur:', error.message);
+        console.error('❌ Erreur chatNotify:', error.message);
       }
       
-      return originalJson(data);
+      return originalJson.call(this, data);
     };
+    
+    next();
+  };
+};
+
+/**
+ * Middleware pour les notifications système
+ */
+const systemNotify = (title, message, priority = 'normale') => {
+  return async (req, res, next) => {
+    const originalJson = res.json;
+    
+    res.json = async function(data) {
+      try {
+        res.json = originalJson;
+        
+        if (data && data.success && req.user) {
+          // Envoyer une notification système à l'utilisateur
+          await NotificationService.createNotification({
+            utilisateur: req.user.id,
+            titre: title,
+            message,
+            entite: 'systeme',
+            type: 'info',
+            priorite: priority,
+            categorie: 'system',
+            action: 'view',
+            metadata: {
+              systemNotification: true,
+              triggeredBy: 'system'
+            },
+            source: 'system',
+            tags: ['system', priority]
+          });
+        }
+      } catch (error) {
+        console.error('❌ Erreur systemNotify:', error.message);
+      }
+      
+      return originalJson.call(this, data);
+    };
+    
+    next();
+  };
+};
+
+/**
+ * Middleware pour nettoyer les notifications
+ */
+const notificationCleanup = () => {
+  return async (req, res, next) => {
+    try {
+      // Nettoyer les notifications expirées (une fois par jour par exemple)
+      const now = new Date();
+      const lastCleanup = req.session?.lastNotificationCleanup;
+      
+      if (!lastCleanup || (now - new Date(lastCleanup)) > 24 * 60 * 60 * 1000) {
+        const result = await NotificationService.cleanupExpiredNotifications();
+        console.log(`🧹 ${result.deletedCount || 0} notifications expirées nettoyées`);
+        
+        if (req.session) {
+          req.session.lastNotificationCleanup = now;
+        }
+      }
+    } catch (error) {
+      console.error('❌ Erreur cleanup notifications:', error.message);
+    }
+    
+    next();
+  };
+};
+
+/**
+ * Middleware pour compter les notifications non lues
+ */
+const unreadCountMiddleware = () => {
+  return async (req, res, next) => {
+    try {
+      if (req.user && req.user.id) {
+        const count = await NotificationService.getUnreadCount(req.user.id);
+        req.unreadNotificationCount = count;
+        
+        // Ajouter au header de réponse
+        res.set('X-Unread-Notifications', count);
+      }
+    } catch (error) {
+      console.error('❌ Erreur comptage notifications:', error.message);
+      req.unreadNotificationCount = 0;
+    }
     
     next();
   };
@@ -116,5 +307,8 @@ const injectNotifications = (options = {}) => {
 
 module.exports = {
   autoNotify,
-  injectNotifications
+  chatNotify,
+  systemNotify,
+  notificationCleanup,
+  unreadCountMiddleware
 };
