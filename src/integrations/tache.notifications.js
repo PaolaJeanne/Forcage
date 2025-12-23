@@ -1,7 +1,7 @@
 const NotificationUniversalService = require('../services/notification.service');
 
 class TacheNotifications {
-  
+
   static async onTacheAssigned(tache, assignedBy) {
     try {
       await NotificationUniversalService.notifyTache({
@@ -12,12 +12,12 @@ class TacheNotifications {
         actionType: 'assigned',
         dateEcheance: tache.dateEcheance
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications tâche assignée:', error);
+
     }
   }
-  
+
   static async onTacheCompleted(tache, completedBy) {
     try {
       // Notifier le créateur de la tâche
@@ -29,12 +29,12 @@ class TacheNotifications {
         actionType: 'completed',
         dateEcheance: tache.dateEcheance
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications tâche complétée:', error);
+
     }
   }
-  
+
   static async onTacheOverdue(tache) {
     try {
       await NotificationUniversalService.notifyTache({
@@ -45,7 +45,7 @@ class TacheNotifications {
         actionType: 'overdue',
         dateEcheance: tache.dateEcheance
       });
-      
+
       // Notifier aussi le créateur
       if (tache.createdBy && tache.createdBy.toString() !== tache.assignee.toString()) {
         await NotificationUniversalService.notifyTache({
@@ -57,9 +57,9 @@ class TacheNotifications {
           dateEcheance: tache.dateEcheance
         });
       }
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications tâche en retard:', error);
+
     }
   }
 }

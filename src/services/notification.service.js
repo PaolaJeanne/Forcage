@@ -4,9 +4,9 @@ const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
 
 class NotificationService {
-  
+
   // ==================== MÉTHODES GÉNÉRIQUES ====================
-  
+
   /**
    * Créer une notification (méthode universelle)
    */
@@ -28,21 +28,21 @@ class NotificationService {
         declencheur = null,
         tags = []
       } = options;
-      
+
       // Validation
       if (!utilisateur || !titre || !message) {
         throw new Error('Paramètres requis manquants');
       }
-      
+
       // Vérifier l'utilisateur
       const userExists = await User.exists({ _id: utilisateur });
       if (!userExists) {
         throw new Error('Utilisateur non trouvé');
       }
-      
+
       // Date d'expiration (30 jours par défaut)
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      
+
       // Créer la notification
       const notification = await Notification.create({
         utilisateur,
@@ -67,26 +67,26 @@ class NotificationService {
         lue: false,
         lueAt: null
       });
-      
+
       // Envoyer en temps réel
       await this.sendRealTimeNotification(notification);
-      
-      console.log(`✅ Notification créée: ${notification._id} (${entite})`);
-      
+
+
+
       return this.formatNotification(notification);
-      
+
     } catch (error) {
-      console.error('❌ Erreur création notification:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Formater une notification pour l'API
    */
   formatNotification(notification) {
     const notif = notification.toObject ? notification.toObject() : notification;
-    
+
     // Ajouter le lien complet
     const baseUrl = process.env.FRONTEND_URL || '';
     if (notif.lien && !notif.lien.startsWith('http')) {
@@ -94,7 +94,7 @@ class NotificationService {
     } else {
       notif.lienComplet = notif.lien;
     }
-    
+
     // Calculer le temps écoulé
     const now = new Date();
     const createdAt = new Date(notif.createdAt);
@@ -102,21 +102,21 @@ class NotificationService {
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
-    
+
     if (diffMins < 1) notif.tempsEcoule = 'À l\'instant';
     else if (diffMins < 60) notif.tempsEcoule = `Il y a ${diffMins} min`;
     else if (diffHours < 24) notif.tempsEcoule = `Il y a ${diffHours} h`;
     else if (diffDays < 7) notif.tempsEcoule = `Il y a ${diffDays} j`;
     else notif.tempsEcoule = createdAt.toLocaleDateString('fr-FR');
-    
+
     // Vérifier expiration
     notif.estExpiree = notif.expiresAt && new Date() > new Date(notif.expiresAt);
-    
+
     return notif;
   }
-  
+
   // ==================== NOTIFICATIONS CHAT ====================
-  
+
   /**
    * Notifier nouveau message
    */
@@ -125,24 +125,24 @@ class NotificationService {
       const message = await Message.findById(messageId)
         .populate('sender', 'nom prenum')
         .populate('conversationId', 'title participants');
-      
+
       if (!message || !message.conversationId) return;
-      
+
       const conversation = await Conversation.findById(message.conversationId._id)
         .populate('participants', 'nom prenum email');
-      
+
       const recipients = conversation.participants.filter(
         participant => participant._id.toString() !== excludeSenderId?.toString()
       );
-      
+
       const notifications = [];
-      
+
       for (const recipient of recipients) {
         const notification = await this.createNotification({
           utilisateur: recipient._id,
           titre: `💬 ${message.sender.prenum} ${message.sender.nom}`,
-          message: message.content.length > 100 
-            ? `${message.content.substring(0, 100)}...` 
+          message: message.content.length > 100
+            ? `${message.content.substring(0, 100)}...`
             : message.content,
           entite: 'message',
           entiteId: message._id,
@@ -163,17 +163,17 @@ class NotificationService {
           declencheur: message.sender._id,
           tags: ['chat', 'message', 'new']
         });
-        
+
         notifications.push(notification);
       }
-      
+
       return notifications;
-      
+
     } catch (error) {
-      console.error('❌ Erreur notification nouveau message:', error);
+
     }
   }
-  
+
   /**
    * Notifier message lu
    */
@@ -182,14 +182,14 @@ class NotificationService {
       const message = await Message.findById(messageId)
         .populate('sender', 'nom prenum')
         .populate('conversationId', 'title');
-      
+
       const reader = await User.findById(readerId).select('nom prenum');
-      
+
       if (!message || !reader || !message.sender) return;
-      
+
       // Ne pas notifier si c'est l'expéditeur qui lit
       if (message.sender._id.toString() === readerId.toString()) return;
-      
+
       return await this.createNotification({
         utilisateur: message.sender._id,
         titre: `👁️ ${reader.prenum} ${reader.nom}`,
@@ -212,12 +212,12 @@ class NotificationService {
         declencheur: reader._id,
         tags: ['chat', 'message', 'read']
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur notification message lu:', error);
+
     }
   }
-  
+
   /**
    * Notifier mention
    */
@@ -225,9 +225,9 @@ class NotificationService {
     try {
       const message = await Message.findById(messageId)
         .populate('conversationId', 'title');
-      
+
       if (!message) return;
-      
+
       return await this.createNotification({
         utilisateur: mentionedUserId,
         titre: `@ ${mentionedByName} vous a mentionné`,
@@ -250,12 +250,12 @@ class NotificationService {
         declencheur: null,
         tags: ['chat', 'mention', 'urgent']
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur notification mention:', error);
+
     }
   }
-  
+
   /**
    * Notifier nouvelle conversation
    */
@@ -263,17 +263,17 @@ class NotificationService {
     try {
       const conversation = await Conversation.findById(conversationId)
         .populate('participants', 'nom prenum email');
-      
+
       const createdBy = await User.findById(createdByUserId).select('nom prenum');
-      
+
       if (!conversation || !createdBy) return;
-      
+
       const otherParticipants = conversation.participants.filter(
         p => p._id.toString() !== createdByUserId.toString()
       );
-      
+
       const notifications = [];
-      
+
       for (const participant of otherParticipants) {
         const notification = await this.createNotification({
           utilisateur: participant._id,
@@ -296,19 +296,19 @@ class NotificationService {
           declencheur: createdByUserId,
           tags: ['chat', 'conversation', 'new']
         });
-        
+
         notifications.push(notification);
       }
-      
+
       return notifications;
-      
+
     } catch (error) {
-      console.error('❌ Erreur notification nouvelle conversation:', error);
+
     }
   }
-  
+
   // ==================== NOTIFICATIONS DEMANDES ====================
-  
+
   /**
    * Notifier création de demande
    */
@@ -319,9 +319,9 @@ class NotificationService {
         demande.conseillerId,
         ...(demande.autresParticipants || [])
       ].filter(Boolean);
-      
+
       const notifications = [];
-      
+
       for (const destinataireId of destinataires) {
         const notification = await this.createNotification({
           utilisateur: destinataireId,
@@ -346,17 +346,17 @@ class NotificationService {
           declencheur: demande.createdBy,
           tags: ['demande', 'created', demande.typeOperation]
         });
-        
+
         notifications.push(notification);
       }
-      
+
       return notifications;
-      
+
     } catch (error) {
-      console.error('❌ Erreur notification demande créée:', error);
+
     }
   }
-  
+
   /**
    * Notifier changement de statut de demande
    */
@@ -366,16 +366,16 @@ class NotificationService {
         demande.clientId,
         demande.conseillerId
       ].filter(Boolean);
-      
+
       const statutMessages = {
         'validée': 'a été validée ✅',
         'rejetée': 'a été rejetée ❌',
         'en_cours': 'est en cours de traitement 🔄',
         'terminee': 'a été terminée 🏁'
       };
-      
+
       const notifications = [];
-      
+
       for (const destinataireId of destinataires) {
         const notification = await this.createNotification({
           utilisateur: destinataireId,
@@ -383,8 +383,8 @@ class NotificationService {
           message: `Votre demande ${statutMessages[demande.statut] || 'a changé de statut'}`,
           entite: 'demande',
           entiteId: demande._id,
-          type: demande.statut === 'rejetée' ? 'error' : 
-                demande.statut === 'validée' ? 'success' : 'info',
+          type: demande.statut === 'rejetée' ? 'error' :
+            demande.statut === 'validée' ? 'success' : 'info',
           priorite: 'normale',
           categorie: 'demande',
           action: 'view',
@@ -401,19 +401,19 @@ class NotificationService {
           declencheur: changedBy,
           tags: ['demande', 'status', demande.statut]
         });
-        
+
         notifications.push(notification);
       }
-      
+
       return notifications;
-      
+
     } catch (error) {
-      console.error('❌ Erreur notification changement statut:', error);
+
     }
   }
-  
+
   // ==================== NOTIFICATIONS SYSTÈME ====================
-  
+
   /**
    * Notifier système (maintenance, alertes, etc.)
    */
@@ -428,14 +428,14 @@ class NotificationService {
         lien = null,
         metadata = {}
       } = options;
-      
+
       let notifications = [];
-      
+
       if (destinataireIds === 'all') {
         // Tous les utilisateurs actifs
         const users = await User.find({ actif: true }).select('_id');
         const userIds = users.map(user => user._id);
-        
+
         for (const userId of userIds) {
           const notification = await this.createNotification({
             utilisateur: userId,
@@ -457,7 +457,7 @@ class NotificationService {
             declencheur: null,
             tags: ['system', 'broadcast', priorite]
           });
-          
+
           notifications.push(notification);
         }
       } else {
@@ -482,20 +482,20 @@ class NotificationService {
             declencheur: null,
             tags: ['system', priorite]
           });
-          
+
           notifications.push(notification);
         }
       }
-      
+
       return notifications;
-      
+
     } catch (error) {
-      console.error('❌ Erreur notification système:', error);
+
     }
   }
-  
+
   // ==================== GESTION DES NOTIFICATIONS ====================
-  
+
   /**
    * Récupérer les notifications d'un utilisateur
    */
@@ -509,26 +509,26 @@ class NotificationService {
         categorie = null,
         priorite = null
       } = filters;
-      
+
       const skip = (page - 1) * limit;
-      
+
       // Construire la query
       const query = { utilisateur: userId };
-      
+
       if (unreadOnly === true || unreadOnly === 'true') {
         query.lue = false;
       }
-      
+
       if (entite) query.entite = entite;
       if (categorie) query.categorie = categorie;
       if (priorite) query.priorite = priorite;
-      
+
       // Exclure les expirées
       query.$or = [
         { expiresAt: { $gt: new Date() } },
         { expiresAt: null }
       ];
-      
+
       // Récupérer
       const notifications = await Notification.find(query)
         .sort({ createdAt: -1 })
@@ -536,26 +536,26 @@ class NotificationService {
         .limit(parseInt(limit))
         .populate('declencheur', 'nom prenum avatar')
         .lean();
-      
+
       // Formater
-      const formattedNotifications = notifications.map(notif => 
+      const formattedNotifications = notifications.map(notif =>
         this.formatNotification(notif)
       );
-      
+
       // Compter
       const total = await Notification.countDocuments(query);
-      
+
       // Compter les non lues par catégorie
       const unreadCounts = await Notification.aggregate([
         { $match: { utilisateur: userId, lue: false } },
         { $group: { _id: '$categorie', count: { $sum: 1 } } }
       ]);
-      
+
       const unreadByCategory = {};
       unreadCounts.forEach(item => {
         unreadByCategory[item._id] = item.count;
       });
-      
+
       return {
         notifications: formattedNotifications,
         pagination: {
@@ -567,13 +567,13 @@ class NotificationService {
         unreadByCategory,
         totalUnread: Object.values(unreadByCategory).reduce((sum, count) => sum + count, 0)
       };
-      
+
     } catch (error) {
-      console.error('❌ Erreur récupération notifications:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Marquer comme lue
    */
@@ -584,11 +584,11 @@ class NotificationService {
         { $set: { lue: true, lueAt: new Date() } },
         { new: true }
       );
-      
+
       if (!notification) {
         throw new Error('Notification non trouvée ou non autorisée');
       }
-      
+
       // Mettre à jour en temps réel
       if (global.io) {
         global.io.of('/notifications').to(`user_${userId}`).emit('notification_read', {
@@ -596,30 +596,30 @@ class NotificationService {
           readAt: new Date()
         });
       }
-      
+
       return this.formatNotification(notification);
-      
+
     } catch (error) {
-      console.error('❌ Erreur marquer comme lue:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Marquer toutes comme lues
    */
   async markAllAsRead(userId, filters = {}) {
     try {
       const query = { utilisateur: userId, lue: false };
-      
+
       if (filters.categorie) query.categorie = filters.categorie;
       if (filters.entite) query.entite = filters.entite;
-      
+
       const result = await Notification.updateMany(
         query,
         { $set: { lue: true, lueAt: new Date() } }
       );
-      
+
       // Mettre à jour en temps réel
       if (global.io) {
         global.io.of('/notifications').to(`user_${userId}`).emit('all_notifications_read', {
@@ -627,19 +627,19 @@ class NotificationService {
           timestamp: new Date()
         });
       }
-      
+
       return {
         success: true,
         modifiedCount: result.modifiedCount,
         message: `${result.modifiedCount} notifications marquées comme lues`
       };
-      
+
     } catch (error) {
-      console.error('❌ Erreur marquer toutes comme lues:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Supprimer une notification
    */
@@ -649,19 +649,19 @@ class NotificationService {
         _id: notificationId,
         utilisateur: userId
       });
-      
+
       if (result.deletedCount === 0) {
         throw new Error('Notification non trouvée ou non autorisée');
       }
-      
+
       return { success: true, message: 'Notification supprimée' };
-      
+
     } catch (error) {
-      console.error('❌ Erreur suppression notification:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Nettoyer les notifications expirées
    */
@@ -671,46 +671,46 @@ class NotificationService {
         expiresAt: { $lt: new Date() },
         priorite: { $ne: 'critique' }
       });
-      
-      console.log(`🗑️ ${result.deletedCount} notifications expirées nettoyées`);
+
+
       return result;
-      
+
     } catch (error) {
-      console.error('❌ Erreur nettoyage notifications:', error);
+
       throw error;
     }
   }
-  
+
   // ==================== WEBSOCKET ====================
-  
+
   /**
    * Envoyer en temps réel
    */
   async sendRealTimeNotification(notification) {
     try {
       if (!global.io) return;
-      
+
       const formatted = this.formatNotification(notification);
-      
+
       // Envoyer à l'utilisateur
       global.io.of('/notifications').to(`user_${notification.utilisateur}`).emit('new_notification', formatted);
-      
+
       // Mettre à jour le compteur
       const unreadCount = await Notification.countDocuments({
         utilisateur: notification.utilisateur,
         lue: false
       });
-      
+
       global.io.of('/notifications').to(`user_${notification.utilisateur}`).emit('unread_count_update', {
         count: unreadCount,
         timestamp: new Date()
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur envoi temps réel:', error);
+
     }
   }
-  
+
   /**
    * Récupérer le compteur de notifications non lues
    */
@@ -724,9 +724,9 @@ class NotificationService {
           { expiresAt: null }
         ]
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur comptage non lues:', error);
+
       return 0;
     }
   }

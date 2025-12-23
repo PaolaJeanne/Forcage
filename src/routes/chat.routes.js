@@ -12,7 +12,7 @@ router.use(authenticate);
 router.get('/team', ChatController.getTeamMembers);
 
 // Démarrer une conversation avec un membre précis
-router.post('/direct', ChatController.startDirectChat);
+router.post('/messages', ChatController.startmessages);
 
 // Démarrer une conversation de support (conseiller auto-assigné)
 router.post('/support', ChatController.startSupport);

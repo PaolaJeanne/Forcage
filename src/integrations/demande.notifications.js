@@ -1,7 +1,7 @@
 const NotificationUniversalService = require('../services/notification.service');
 
 class DemandeNotifications {
-  
+
   static async onDemandeCreated(demande) {
     try {
       // Notifier le client
@@ -15,7 +15,7 @@ class DemandeNotifications {
         declencheurId: demande.createdBy,
         actionType: 'created'
       });
-      
+
       // Notifier le conseiller assigné
       if (demande.conseillerId) {
         await NotificationUniversalService.notifyDemande({
@@ -29,18 +29,18 @@ class DemandeNotifications {
           actionType: 'assigned'
         });
       }
-      
-      console.log(`✅ Notifications envoyées pour demande créée: ${demande.numeroReference}`);
-      
+
+
+
     } catch (error) {
-      console.error('❌ Erreur notifications demande créée:', error);
+
     }
   }
-  
+
   static async onDemandeUpdated(demande, previousState, updatedBy) {
     try {
       const destinataires = [demande.clientId, demande.conseillerId].filter(Boolean);
-      
+
       for (const destinataireId of destinataires) {
         await NotificationUniversalService.notifyDemande({
           demandeId: demande._id,
@@ -53,18 +53,18 @@ class DemandeNotifications {
           actionType: 'updated'
         });
       }
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications demande mise à jour:', error);
+
     }
   }
-  
+
   static async onDemandeStatusChanged(demande, previousStatus, changedBy) {
     try {
       const actionType = demande.statut === 'validée' ? 'validated' :
-                        demande.statut === 'rejetée' ? 'rejected' :
-                        demande.statut === 'complétée' ? 'completed' : 'updated';
-      
+        demande.statut === 'rejetée' ? 'rejected' :
+          demande.statut === 'complétée' ? 'completed' : 'updated';
+
       // Notifier le client
       await NotificationUniversalService.notifyDemande({
         demandeId: demande._id,
@@ -76,7 +76,7 @@ class DemandeNotifications {
         declencheurId: changedBy,
         actionType
       });
-      
+
       // Notifier le conseiller
       if (demande.conseillerId) {
         await NotificationUniversalService.notifyDemande({
@@ -90,7 +90,7 @@ class DemandeNotifications {
           actionType
         });
       }
-      
+
       // Notifier les administrateurs si rejet ou validation
       if (demande.statut === 'validée' || demande.statut === 'rejetée') {
         const User = require('../models/User');
@@ -98,7 +98,7 @@ class DemandeNotifications {
           role: { $in: ['admin', 'dga'] },
           _id: { $nin: [demande.clientId, demande.conseillerId, changedBy] }
         }).select('_id');
-        
+
         for (const admin of admins) {
           await NotificationUniversalService.notifyDemande({
             demandeId: demande._id,
@@ -112,12 +112,12 @@ class DemandeNotifications {
           });
         }
       }
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications changement statut:', error);
+
     }
   }
-  
+
   static async onDemandeCommentAdded(demande, comment, commentBy) {
     try {
       // Notifier le propriétaire de la demande (client)
@@ -131,12 +131,12 @@ class DemandeNotifications {
         declencheurId: commentBy,
         actionType: 'commented'
       });
-      
+
       // Notifier l'autre partie (conseiller si commentaire par client, client si commentaire par conseiller)
-      const otherParty = commentBy.toString() === demande.clientId.toString() 
-        ? demande.conseillerId 
+      const otherParty = commentBy.toString() === demande.clientId.toString()
+        ? demande.conseillerId
         : demande.clientId;
-      
+
       if (otherParty) {
         await NotificationUniversalService.notifyDemande({
           demandeId: demande._id,
@@ -149,17 +149,17 @@ class DemandeNotifications {
           actionType: 'commented'
         });
       }
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications commentaire:', error);
+
     }
   }
-  
+
   static async onDemandeEcheance(demande, daysUntilDue) {
     try {
       const destinataires = [demande.clientId, demande.conseillerId].filter(Boolean);
       const actionType = daysUntilDue <= 0 ? 'overdue' : 'echeance';
-      
+
       for (const destinataireId of destinataires) {
         await NotificationUniversalService.notifyDemande({
           demandeId: demande._id,
@@ -172,9 +172,9 @@ class DemandeNotifications {
           actionType
         });
       }
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications échéance:', error);
+
     }
   }
 }

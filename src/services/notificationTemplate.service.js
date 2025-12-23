@@ -2,29 +2,29 @@
 const NotificationTemplate = require('../models/NotificationTemplate');
 
 class NotificationTemplateService {
-  
+
   /**
    * Initialiser les templates par défaut
    */
   static async initialiserTemplatesParDefaut() {
     const templates = this.getTemplatesParDefaut();
-    
+
     for (const template of templates) {
       try {
         const existe = await NotificationTemplate.findOne({ code: template.code });
-        
+
         if (!existe) {
           await NotificationTemplate.create(template);
-          console.log(`✅ Template créé: ${template.code}`);
+
         }
       } catch (error) {
-        console.error(`❌ Erreur création template ${template.code}:`, error.message);
+
       }
     }
-    
-    console.log('✅ Initialisation des templates terminée');
+
+
   }
-  
+
   /**
    * Templates par défaut
    */
@@ -124,27 +124,27 @@ class NotificationTemplateService {
       }
     ];
   }
-  
+
   /**
    * Lister tous les templates
    */
   static async listerTemplates(filters = {}) {
     const query = { actif: true };
-    
+
     if (filters.categorie) query.categorie = filters.categorie;
     if (filters.type) query.type = filters.type;
-    
+
     return await NotificationTemplate.find(query)
       .sort({ categorie: 1, code: 1 });
   }
-  
+
   /**
    * Récupérer un template par code
    */
   static async getTemplateByCode(code) {
-    return await NotificationTemplate.findOne({ 
-      code: code.toUpperCase(), 
-      actif: true 
+    return await NotificationTemplate.findOne({
+      code: code.toUpperCase(),
+      actif: true
     });
   }
 }

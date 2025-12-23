@@ -45,30 +45,26 @@ const upload = multer({
 // ✅ MIDDLEWARE PERSONNALISÉ QUI PARSE CORRECTEMENT
 const uploadMultiple = (req, res, next) => {
   const multerUpload = upload.array('justificatifs', 5);
-  
+
   multerUpload(req, res, (err) => {
     if (err instanceof multer.MulterError) {
-      console.error('❌ Erreur Multer:', err);
+
       return res.status(400).json({
         success: false,
         message: `Erreur upload: ${err.message}`,
         code: err.code
       });
     } else if (err) {
-      console.error('❌ Erreur:', err);
+
       return res.status(400).json({
         success: false,
         message: err.message
       });
     }
-    
+
     // 🔍 Debug - Voir ce qui a été parsé
-    console.log('============ APRÈS MULTER ============');
-    console.log('📥 req.body:', req.body);
-    console.log('📥 Keys:', Object.keys(req.body));
-    console.log('📎 req.files:', req.files ? req.files.length : 0);
-    console.log('=====================================');
-    
+
+
     next();
   });
 };

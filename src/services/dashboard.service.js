@@ -2,11 +2,11 @@
 const DemandeForçage = require('../models/DemandeForçage');
 
 class DashboardService {
-  
+
   static async getFilteredKPIs(query, role) {
     try {
-      console.log(`📊 KPIs filtrés pour rôle: ${role}`);
-      
+
+
       const kpis = {
         demandesTotal: 0,
         demandesEnCours: 0,
@@ -16,43 +16,43 @@ class DashboardService {
         montantMoyen: 0,
         tempsTraitementMoyen: 0
       };
-      
+
       // Compter selon les filtres
       const [total, enCours, validees] = await Promise.all([
         DemandeForçage.countDocuments(query),
         DemandeForçage.countDocuments({ ...query, statut: { $in: ['SOUMISE', 'EN_COURS'] } }),
         DemandeForçage.countDocuments({ ...query, statut: 'VALIDEE' })
       ]);
-      
+
       kpis.demandesTotal = total;
       kpis.demandesEnCours = enCours;
       kpis.tauxValidation = total > 0 ? Math.round((validees / total) * 100) : 0;
-      
+
       // Agréger le montant total
       const montantAgg = await DemandeForçage.aggregate([
         { $match: query },
         { $group: { _id: null, total: { $sum: '$montant' } } }
       ]);
-      
+
       kpis.montantTotal = montantAgg[0]?.total || 0;
       kpis.montantMoyen = total > 0 ? Math.round(kpis.montantTotal / total) : 0;
-      
+
       // Clients actifs (distincts)
       const clientsActifs = await DemandeForçage.distinct('client', query);
       kpis.clientsActifs = clientsActifs.length;
-      
+
       return kpis;
-      
+
     } catch (error) {
-      console.error('❌ Erreur KPIs filtrés:', error);
+
       throw error;
     }
   }
-  
+
   static async getFilteredStats(user, filters = {}) {
     try {
       let query = this.buildQueryForRole(user, filters);
-      
+
       const stats = {
         demandesParStatut: [],
         demandesParRisque: [],
@@ -60,36 +60,40 @@ class DashboardService {
         topConseillers: [],
         topClients: []
       };
-      
+
       // Statistiques par statut
       stats.demandesParStatut = await DemandeForçage.aggregate([
         { $match: query },
-        { $group: { 
-          _id: '$statut', 
-          count: { $sum: 1 },
-          montantTotal: { $sum: '$montant' },
-          montantMoyen: { $avg: '$montant' }
-        }},
+        {
+          $group: {
+            _id: '$statut',
+            count: { $sum: 1 },
+            montantTotal: { $sum: '$montant' },
+            montantMoyen: { $avg: '$montant' }
+          }
+        },
         { $sort: { count: -1 } }
       ]);
-      
+
       // Statistiques par score de risque (si accessible)
       if (['admin', 'dga', 'risques', 'rm', 'dce', 'adg'].includes(user.role)) {
         stats.demandesParRisque = await DemandeForçage.aggregate([
           { $match: query },
-          { $group: { 
-            _id: '$scoreRisque', 
-            count: { $sum: 1 },
-            montantMoyen: { $avg: '$montant' }
-          }},
+          {
+            $group: {
+              _id: '$scoreRisque',
+              count: { $sum: 1 },
+              montantMoyen: { $avg: '$montant' }
+            }
+          },
           { $sort: { '_id': 1 } }
         ]);
       }
-      
+
       // Évolution mensuelle
       stats.evolutionMensuelle = await DemandeForçage.aggregate([
         { $match: query },
-        { 
+        {
           $group: {
             _id: {
               year: { $year: '$createdAt' },
@@ -102,20 +106,20 @@ class DashboardService {
         { $sort: { '_id.year': 1, '_id.month': 1 } },
         { $limit: 12 }
       ]);
-      
+
       // Top conseillers (si accessible)
       if (['admin', 'dga', 'risques', 'rm', 'dce', 'adg'].includes(user.role)) {
         stats.topConseillers = await DemandeForçage.aggregate([
           { $match: query },
-          { 
+          {
             $group: {
               _id: '$conseiller',
               count: { $sum: 1 },
               montantTotal: { $sum: '$montant' },
-              tauxValidation: { 
-                $avg: { 
-                  $cond: [{ $eq: ['$statut', 'VALIDEE'] }, 1, 0] 
-                } 
+              tauxValidation: {
+                $avg: {
+                  $cond: [{ $eq: ['$statut', 'VALIDEE'] }, 1, 0]
+                }
               }
             }
           },
@@ -123,55 +127,55 @@ class DashboardService {
           { $limit: 5 }
         ]);
       }
-      
+
       return stats;
-      
+
     } catch (error) {
-      console.error('❌ Erreur statistiques filtrées:', error);
+
       throw error;
     }
   }
-  
+
   // Statistiques de base (pour tous les rôles)
   static async getBasicStats(query, role) {
     const stats = {
       demandesParStatut: [],
       demandesParType: []
     };
-    
+
     // Par statut
     stats.demandesParStatut = await DemandeForçage.aggregate([
       { $match: query },
-      { 
-        $group: { 
-          _id: '$statut', 
+      {
+        $group: {
+          _id: '$statut',
           count: { $sum: 1 }
         }
       },
       { $sort: { count: -1 } }
     ]);
-    
+
     // Par type
     stats.demandesParType = await DemandeForçage.aggregate([
       { $match: query },
-      { 
-        $group: { 
-          _id: '$typeOperation', 
+      {
+        $group: {
+          _id: '$typeOperation',
           count: { $sum: 1 }
         }
       },
       { $sort: { count: -1 } }
     ]);
-    
+
     return stats;
   }
-  
+
   // Statistiques avancées (RM et +)
   static async getAdvancedStats(query, role) {
     const stats = await this.getBasicStats(query, role);
-    
+
     // Ajouter des métriques avancées
-    
+
     // Temps moyen de traitement
     const tempsTraitement = await DemandeForçage.aggregate([
       { $match: { ...query, dateTraitement: { $exists: true } } },
@@ -189,14 +193,14 @@ class DashboardService {
         }
       }
     ]);
-    
-    stats.tempsTraitementMoyen = tempsTraitement[0] 
+
+    stats.tempsTraitementMoyen = tempsTraitement[0]
       ? Math.round(tempsTraitement[0].moyenneMs / (1000 * 60 * 60)) // Convertir en heures
       : 0;
-    
+
     return stats;
   }
-  
+
   // Statistiques de risque (Risques, ADG, DGA, Admin)
   static async getRiskStats(query, role) {
     const stats = {
@@ -205,13 +209,13 @@ class DashboardService {
       montantTotalRisque: 0,
       alertes: []
     };
-    
+
     // Par score de risque
     stats.parScoreRisque = await DemandeForçage.aggregate([
       { $match: query },
-      { 
-        $group: { 
-          _id: '$scoreRisque', 
+      {
+        $group: {
+          _id: '$scoreRisque',
           count: { $sum: 1 },
           montantTotal: { $sum: '$montant' },
           montantMoyen: { $avg: '$montant' }
@@ -219,19 +223,19 @@ class DashboardService {
       },
       { $sort: { count: -1 } }
     ]);
-    
+
     // Demandes à risque élevé ou critique
     const risqueEleve = await DemandeForçage.countDocuments({
       ...query,
       scoreRisque: { $in: ['ELEVE', 'CRITIQUE'] },
       statut: { $in: ['ENVOYEE', 'EN_ETUDE', 'EN_VALIDATION'] }
     });
-    
+
     stats.demandesRisqueEleve = risqueEleve;
-    
+
     // Montant total des demandes à risque
     const montantRisque = await DemandeForçage.aggregate([
-      { 
+      {
         $match: {
           ...query,
           scoreRisque: { $in: ['ELEVE', 'CRITIQUE'] }
@@ -244,9 +248,9 @@ class DashboardService {
         }
       }
     ]);
-    
+
     stats.montantTotalRisque = montantRisque[0]?.total || 0;
-    
+
     // Alertes (demandes en retard)
     stats.alertes = await DemandeForçage.find({
       ...query,
@@ -254,13 +258,13 @@ class DashboardService {
       regularisee: false,
       dateEcheance: { $lt: new Date() }
     })
-    .limit(10)
-    .populate('clientId', 'nom prenom email')
-    .lean();
-    
+      .limit(10)
+      .populate('clientId', 'nom prenom email')
+      .lean();
+
     return stats;
   }
-  
+
   // Statistiques globales (Admin, DGA)
   static async getGlobalStats() {
     const stats = {
@@ -269,7 +273,7 @@ class DashboardService {
       parAgence: [],
       performanceGlobale: {}
     };
-    
+
     // Total général
     const totaux = await DemandeForçage.aggregate([
       {
@@ -280,12 +284,12 @@ class DashboardService {
         }
       }
     ]);
-    
+
     if (totaux.length > 0) {
       stats.totalDemandes = totaux[0].total;
       stats.totalMontant = totaux[0].montantTotal;
     }
-    
+
     // Par agence
     stats.parAgence = await DemandeForçage.aggregate([
       {
@@ -293,27 +297,27 @@ class DashboardService {
           _id: '$agenceId',
           total: { $sum: 1 },
           montantTotal: { $sum: '$montant' },
-          validees: { 
-            $sum: { 
-              $cond: [{ $eq: ['$statut', 'VALIDEE'] }, 1, 0] 
-            } 
+          validees: {
+            $sum: {
+              $cond: [{ $eq: ['$statut', 'VALIDEE'] }, 1, 0]
+            }
           }
         }
       },
       {
         $addFields: {
-          tauxValidation: { 
-            $multiply: [{ $divide: ['$validees', '$total'] }, 100] 
+          tauxValidation: {
+            $multiply: [{ $divide: ['$validees', '$total'] }, 100]
           }
         }
       },
       { $sort: { montantTotal: -1 } },
       { $limit: 10 }
     ]);
-    
+
     return stats;
   }
-  
+
   // Activités récentes avec limite
   static async getRecentActivities(query, role, limit = 10) {
     const demandes = await DemandeForçage.find(query)
@@ -322,7 +326,7 @@ class DashboardService {
       .populate('clientId', 'nom prenom email')
       .populate('conseillerId', 'nom prenom')
       .lean();
-    
+
     return demandes.map(d => ({
       id: d._id,
       numeroReference: d.numeroReference,
@@ -343,11 +347,11 @@ class DashboardService {
       updatedAt: d.updatedAt
     }));
   }
-  
+
   // Helper pour construire la query selon le rôle
   static buildQueryForRole(user, filters = {}) {
     let query = {};
-    
+
     // Base selon le rôle
     switch (user.role) {
       case 'admin':
@@ -355,28 +359,28 @@ class DashboardService {
       case 'risques':
         // Toutes les données
         break;
-        
+
       case 'client':
         query.client = user._id || user.id;
         break;
-        
+
       case 'conseiller':
         query.$or = [
           { conseiller: user._id || user.id },
           { agence: user.agence }
         ];
         break;
-        
+
       case 'rm':
       case 'dce':
       case 'adg':
         query.agence = user.agence;
         break;
-        
+
       default:
         query.client = user._id || user.id;
     }
-    
+
     // Appliquer les filtres additionnels
     if (filters.statut) query.statut = filters.statut;
     if (filters.typeOperation) query.typeOperation = filters.typeOperation;
@@ -386,24 +390,24 @@ class DashboardService {
       if (filters.dateDebut) query.createdAt.$gte = new Date(filters.dateDebut);
       if (filters.dateFin) query.createdAt.$lte = new Date(filters.dateFin);
     }
-    
+
     return query;
   }
-  
+
   // Ajoutez cette méthode
   static async getDashboardData(user, filters = {}) {
     try {
-      console.log(`📊 Dashboard data pour ${user.role} (${user._id || user.id})`);
-      
+
+
       const query = this.buildQueryForRole(user, filters);
-      
+
       // Récupérer toutes les données en parallèle
       const [kpis, stats, recentActivities] = await Promise.all([
         this.getFilteredKPIs(query, user.role),
         this.getFilteredStats(user, filters),
         this.getRecentActivities(query, user.role, 5)
       ]);
-      
+
       // Construire la réponse complète
       const dashboardData = {
         user: {
@@ -424,35 +428,35 @@ class DashboardService {
         generatedAt: new Date(),
         accessLevel: this.getAccessLevel(user.role)
       };
-      
+
       // Ajouter des données supplémentaires selon le rôle
       if (['admin', 'dga', 'risques'].includes(user.role)) {
         const globalStats = await this.getGlobalStats();
         dashboardData.globalStats = globalStats;
       }
-      
+
       if (['admin', 'dga', 'risques', 'rm', 'dce', 'adg'].includes(user.role)) {
         const riskStats = await this.getRiskStats(query, user.role);
         dashboardData.riskStats = riskStats;
       }
-      
+
       return dashboardData;
-      
+
     } catch (error) {
-      console.error('❌ Erreur dashboard data:', error);
+
       throw error;
     }
   }
-  
+
   // ... autres méthodes existantes
-  
+
   // Ajoutez ces méthodes helpers
   static getAvailableFilters(role) {
     const filters = [
-      { 
-        key: 'periode', 
-        label: 'Période', 
-        type: 'select', 
+      {
+        key: 'periode',
+        label: 'Période',
+        type: 'select',
         options: [
           { value: 'today', label: "Aujourd'hui" },
           { value: 'week', label: 'Cette semaine' },
@@ -460,10 +464,10 @@ class DashboardService {
           { value: 'quarter', label: 'Ce trimestre' }
         ]
       },
-      { 
-        key: 'statut', 
-        label: 'Statut', 
-        type: 'multi-select', 
+      {
+        key: 'statut',
+        label: 'Statut',
+        type: 'multi-select',
         options: [
           { value: 'BROUILLON', label: 'Brouillon' },
           { value: 'SOUMISE', label: 'Soumise' },
@@ -473,23 +477,23 @@ class DashboardService {
         ]
       }
     ];
-    
+
     if (['admin', 'dga', 'risques'].includes(role)) {
       filters.push(
         { key: 'agenceId', label: 'Agence', type: 'select', dynamic: true },
         { key: 'conseillerId', label: 'Conseiller', type: 'select', dynamic: true }
       );
     }
-    
+
     if (role !== 'client') {
       filters.push(
         { key: 'clientId', label: 'Client', type: 'select', dynamic: true }
       );
     }
-    
+
     return filters;
   }
-  
+
   static getAccessLevel(role) {
     const levels = {
       'client': 'personal',
@@ -501,7 +505,7 @@ class DashboardService {
       'risques': 'risk_management',
       'admin': 'global'
     };
-    
+
     return levels[role] || 'restricted';
   }
 }

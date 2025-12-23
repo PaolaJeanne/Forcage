@@ -2,7 +2,7 @@
 const User = require('../models/User');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt.util');
 const { successResponse, errorResponse } = require('../utils/response.util');
-const logger = require('../utils/logger');
+
 
 // ============================================
 // INSCRIPTION - Retourne uniquement l'utilisateur
@@ -10,21 +10,21 @@ const logger = require('../utils/logger');
 const register = async (req, res) => {
   try {
     const { nom, prenom, email, password, telephone, numeroCompte } = req.body;
-    
+
     // Validation
     if (!nom || !prenom || !email || !password) {
       return errorResponse(res, 400, 'Tous les champs obligatoires requis');
     }
-    
+
     if (password.length < 6) {
       return errorResponse(res, 400, 'Le mot de passe doit contenir au moins 6 caractères');
     }
-    
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return errorResponse(res, 400, 'Cet email est déjà utilisé');
     }
-    
+
     // Rôle client forcé
     const user = new User({
       nom,
@@ -39,11 +39,11 @@ const register = async (req, res) => {
       notationClient: 'C',
       kycValide: false
     });
-    
+
     await user.save();
-    
-    logger.info(`Nouvel utilisateur: ${email} (role: client)`);
-    
+
+
+
     // OPTIMISATION: À l'inscription, on ne retourne QUE l'utilisateur
     return successResponse(res, 201, 'Inscription réussie', {
       user: {
@@ -57,9 +57,9 @@ const register = async (req, res) => {
       }
       // PAS de token ni refreshToken ici
     });
-    
+
   } catch (error) {
-    logger.error('Erreur inscription:', error);
+
     return errorResponse(res, 500, 'Erreur lors de l\'inscription');
   }
 };
@@ -70,37 +70,37 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    
+
     if (!email || !password) {
       return errorResponse(res, 400, 'Email et mot de passe requis');
     }
-    
+
     const user = await User.findByEmailWithPassword(email);
-    
+
     if (!user) {
       return errorResponse(res, 401, 'Email ou mot de passe incorrect');
     }
-    
+
     if (!user.isActive) {
       return errorResponse(res, 403, 'Compte désactivé');
     }
-    
+
     const isPasswordValid = await user.comparePassword(password);
-    
+
     if (!isPasswordValid) {
       return errorResponse(res, 401, 'Email ou mot de passe incorrect');
     }
-    
+
     // Mettre à jour lastLogin
     await User.updateOne(
       { _id: user._id },
       { $set: { lastLogin: new Date() } }
     );
-    
+
     // Générer tokens
-    const token = generateToken({ 
-      userId: user._id, 
-      email: user.email, 
+    const token = generateToken({
+      userId: user._id,
+      email: user.email,
       role: user.role,
       nom: user.nom,
       prenom: user.prenom,
@@ -108,20 +108,20 @@ const login = async (req, res) => {
       agence: user.agence,
       isActive: user.isActive
     });
-    
+
     const refreshToken = generateRefreshToken({ userId: user._id });
-    
-    logger.info(`Connexion: ${email} (role: ${user.role})`);
-    
+
+
+
     // OPTIMISATION: À la connexion, on ne retourne QUE les tokens
     return successResponse(res, 200, 'Connexion réussie', {
       token,
       refreshToken
       // PAS d'infos utilisateur ici
     });
-    
+
   } catch (error) {
-    logger.error('Erreur connexion:', error);
+
     return errorResponse(res, 500, 'Erreur lors de la connexion');
   }
 };
@@ -134,11 +134,11 @@ const getProfile = async (req, res) => {
     // Récupérer les infos complètes de l'utilisateur
     const user = await User.findById(req.userId)
       .select('telephone numeroCompte classification notationClient kycValide dateKyc listeSMP soldeActuel decouvertAutorise');
-    
+
     if (!user) {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
-    
+
     // Retourner toutes les infos utilisateur
     return successResponse(res, 200, 'Profil récupéré', {
       user: {
@@ -163,7 +163,7 @@ const getProfile = async (req, res) => {
         createdAt: user.createdAt
       }
     });
-    
+
   } catch (error) {
     return errorResponse(res, 500, 'Erreur serveur');
   }
@@ -175,21 +175,21 @@ const getProfile = async (req, res) => {
 const refreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    
+
     if (!refreshToken) {
       return errorResponse(res, 400, 'Refresh token requis');
     }
-    
+
     const decoded = verifyRefreshToken(refreshToken);
     const user = await User.findById(decoded.userId);
-    
+
     if (!user || !user.isActive) {
       return errorResponse(res, 401, 'Utilisateur non trouvé ou inactif');
     }
-    
-    const newToken = generateToken({ 
-      userId: user._id, 
-      email: user.email, 
+
+    const newToken = generateToken({
+      userId: user._id,
+      email: user.email,
       role: user.role,
       nom: user.nom,
       prenom: user.prenom,
@@ -197,11 +197,11 @@ const refreshToken = async (req, res) => {
       agence: user.agence,
       isActive: user.isActive
     });
-    
+
     return successResponse(res, 200, 'Token rafraîchi', {
       token: newToken
     });
-    
+
   } catch (error) {
     return errorResponse(res, 401, 'Refresh token invalide');
   }
@@ -210,21 +210,21 @@ const refreshToken = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const { nom, prenom, telephone } = req.body;
-    
+
     const user = await User.findById(req.userId);
-    
+
     if (!user) {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
-    
+
     if (nom) user.nom = nom;
     if (prenom) user.prenom = prenom;
     if (telephone) user.telephone = telephone;
-    
+
     await user.save();
-    
-    logger.info(`Profil mis à jour: ${user.email}`);
-    
+
+
+
     return successResponse(res, 200, 'Profil mis à jour', {
       user: {
         id: user._id,
@@ -235,9 +235,9 @@ const updateProfile = async (req, res) => {
         updatedAt: user.updatedAt
       }
     });
-    
+
   } catch (error) {
-    logger.error('Erreur mise à jour profil:', error);
+
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
@@ -245,35 +245,35 @@ const updateProfile = async (req, res) => {
 const changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
-    
+
     if (!oldPassword || !newPassword) {
       return errorResponse(res, 400, 'Ancien et nouveau mot de passe requis');
     }
-    
+
     if (newPassword.length < 6) {
       return errorResponse(res, 400, 'Le nouveau mot de passe doit contenir au moins 6 caractères');
     }
-    
+
     const user = await User.findById(req.userId).select('+password');
-    
+
     if (!user) {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
-    
+
     const isPasswordValid = await user.comparePassword(oldPassword);
-    
+
     if (!isPasswordValid) {
       return errorResponse(res, 401, 'Ancien mot de passe incorrect');
     }
-    
+
     user.password = newPassword;
     await user.save();
-    
-    logger.info(`Mot de passe changé: ${user.email}`);
-    
-    const newToken = generateToken({ 
-      userId: user._id, 
-      email: user.email, 
+
+
+
+    const newToken = generateToken({
+      userId: user._id,
+      email: user.email,
       role: user.role,
       nom: user.nom,
       prenom: user.prenom,
@@ -281,13 +281,13 @@ const changePassword = async (req, res) => {
       agence: user.agence,
       isActive: user.isActive
     });
-    
+
     return successResponse(res, 200, 'Mot de passe changé avec succès', {
       token: newToken
     });
-    
+
   } catch (error) {
-    logger.error('Erreur changement mot de passe:', error);
+
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };

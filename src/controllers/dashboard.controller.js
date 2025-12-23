@@ -17,17 +17,17 @@ module.exports = {
         dateDebut: req.query.dateDebut,
         dateFin: req.query.dateFin
       };
-      
+
       const dashboardData = await DashboardService.getDashboardData(req.user, filters);
-      
+
       return successResponse(res, 200, 'Dashboard récupéré avec succès', dashboardData);
-      
+
     } catch (error) {
-      console.error('❌ Erreur dashboard:', error);
+
       return errorResponse(res, 500, 'Erreur lors de la récupération du dashboard', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/own
    * Dashboard personnel (mes propres données)
@@ -36,7 +36,7 @@ module.exports = {
     try {
       const filters = { ...req.query };
       const dashboardData = await DashboardService.getDashboardData(req.user, filters);
-      
+
       // Filtrer pour ne garder que les données personnelles
       const ownData = {
         user: dashboardData.user,
@@ -47,15 +47,15 @@ module.exports = {
           demandesParType: dashboardData.stats.demandesParType
         }
       };
-      
+
       return successResponse(res, 200, 'Dashboard personnel récupéré', ownData);
-      
+
     } catch (error) {
-      console.error('❌ Erreur dashboard own:', error);
+
       return errorResponse(res, 500, 'Erreur dashboard personnel', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/team
    * Dashboard de l'équipe
@@ -64,20 +64,20 @@ module.exports = {
     try {
       const filters = { ...req.query };
       const dashboardData = await DashboardService.getDashboardData(req.user, filters);
-      
+
       return successResponse(res, 200, 'Dashboard équipe récupéré', {
         user: dashboardData.user,
         kpis: dashboardData.kpis,
         stats: dashboardData.stats,
         recentActivities: dashboardData.recentActivities
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur dashboard team:', error);
+
       return errorResponse(res, 500, 'Erreur dashboard équipe', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/agency
    * Dashboard de l'agence
@@ -86,15 +86,15 @@ module.exports = {
     try {
       const filters = { ...req.query };
       const dashboardData = await DashboardService.getDashboardData(req.user, filters);
-      
+
       return successResponse(res, 200, 'Dashboard agence récupéré', dashboardData);
-      
+
     } catch (error) {
-      console.error('❌ Erreur dashboard agency:', error);
+
       return errorResponse(res, 500, 'Erreur dashboard agence', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/global
    * Dashboard global (toutes les agences)
@@ -103,21 +103,21 @@ module.exports = {
     try {
       const filters = { ...req.query };
       const dashboardData = await DashboardService.getDashboardData(req.user, filters);
-      
+
       // Ajouter des stats globales supplémentaires
       const globalStats = await DashboardService.getGlobalStats();
-      
+
       return successResponse(res, 200, 'Dashboard global récupéré', {
         ...dashboardData,
         globalStats
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur dashboard global:', error);
+
       return errorResponse(res, 500, 'Erreur dashboard global', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/widgets
    * Widgets disponibles selon le rôle
@@ -125,18 +125,18 @@ module.exports = {
   getWidgets: async (req, res) => {
     try {
       const widgets = PermissionHelper.getAvailableWidgets(req.user.role);
-      
-      return successResponse(res, 200, 'Widgets récupérés', { 
+
+      return successResponse(res, 200, 'Widgets récupérés', {
         widgets,
         total: widgets.length,
         role: req.user.role
       });
-      
+
     } catch (error) {
       return errorResponse(res, 500, 'Erreur récupération widgets', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/permissions
    * Permissions de l'utilisateur
@@ -144,7 +144,7 @@ module.exports = {
   getPermissions: async (req, res) => {
     try {
       const permissions = PermissionHelper.getRolePermissions(req.user.role);
-      
+
       return successResponse(res, 200, 'Permissions récupérées', {
         user: {
           id: req.user.id,
@@ -155,12 +155,12 @@ module.exports = {
         permissions,
         total: permissions.length
       });
-      
+
     } catch (error) {
       return errorResponse(res, 500, 'Erreur récupération permissions', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/kpis
    * KPIs selon le rôle
@@ -169,18 +169,18 @@ module.exports = {
     try {
       const query = PermissionHelper.buildQueryForRole(req.user, req.query);
       const kpis = await DashboardService.getKPIs(query, req.user.role);
-      
-      return successResponse(res, 200, 'KPIs récupérés', { 
+
+      return successResponse(res, 200, 'KPIs récupérés', {
         kpis,
         role: req.user.role,
         generatedAt: new Date()
       });
-      
+
     } catch (error) {
       return errorResponse(res, 500, 'Erreur récupération KPIs', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/stats/basic
    * Statistiques de base
@@ -189,14 +189,14 @@ module.exports = {
     try {
       const query = PermissionHelper.buildQueryForRole(req.user, req.query);
       const stats = await DashboardService.getBasicStats(query, req.user.role);
-      
+
       return successResponse(res, 200, 'Statistiques de base récupérées', { stats });
-      
+
     } catch (error) {
       return errorResponse(res, 500, 'Erreur récupération stats', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/stats/advanced
    * Statistiques avancées
@@ -205,14 +205,14 @@ module.exports = {
     try {
       const query = PermissionHelper.buildQueryForRole(req.user, req.query);
       const stats = await DashboardService.getAdvancedStats(query, req.user.role);
-      
+
       return successResponse(res, 200, 'Statistiques avancées récupérées', { stats });
-      
+
     } catch (error) {
       return errorResponse(res, 500, 'Erreur récupération stats avancées', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/stats/risk
    * Statistiques de risque
@@ -221,14 +221,14 @@ module.exports = {
     try {
       const query = PermissionHelper.buildQueryForRole(req.user, req.query);
       const stats = await DashboardService.getRiskStats(query, req.user.role);
-      
+
       return successResponse(res, 200, 'Statistiques de risque récupérées', { stats });
-      
+
     } catch (error) {
       return errorResponse(res, 500, 'Erreur récupération stats risque', error.message);
     }
   },
-  
+
   /**
    * GET /api/v1/dashboard/activities/recent
    * Activités récentes
@@ -237,14 +237,14 @@ module.exports = {
     try {
       const query = PermissionHelper.buildQueryForRole(req.user, req.query);
       const limit = parseInt(req.query.limit) || 10;
-      
+
       const activities = await DashboardService.getRecentActivities(query, req.user.role, limit);
-      
-      return successResponse(res, 200, 'Activités récentes récupérées', { 
+
+      return successResponse(res, 200, 'Activités récentes récupérées', {
         activities,
         total: activities.length
       });
-      
+
     } catch (error) {
       return errorResponse(res, 500, 'Erreur récupération activités', error.message);
     }

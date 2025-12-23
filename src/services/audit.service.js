@@ -1,10 +1,10 @@
 //src/services/audit.service.js`
 
 const { AuditLog } = require('../models');
-const logger = require('../utils/logger');
+
 
 class AuditService {
-  
+
   /**
    * Créer un log d'audit
    */
@@ -19,15 +19,15 @@ class AuditService {
         ipAddress: data.ipAddress,
         userAgent: data.userAgent
       });
-      
+
       await auditLog.save();
       return auditLog;
     } catch (error) {
-      logger.error('Erreur audit service:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Récupérer l'historique d'audit d'une entité
    */
@@ -36,14 +36,14 @@ class AuditService {
       const logs = await AuditLog.find({ entite, entiteId })
         .populate('utilisateur', 'nom prenom email role')
         .sort({ createdAt: -1 });
-      
+
       return logs;
     } catch (error) {
-      logger.error('Erreur récupération historique:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Récupérer l'historique d'un utilisateur
    */
@@ -52,41 +52,41 @@ class AuditService {
       const logs = await AuditLog.find({ utilisateur: userId })
         .sort({ createdAt: -1 })
         .limit(limit);
-      
+
       return logs;
     } catch (error) {
-      logger.error('Erreur récupération historique utilisateur:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Récupérer tous les logs avec filtres
    */
   static async getLogs(filters = {}, page = 1, limit = 50) {
     try {
       const query = {};
-      
+
       if (filters.utilisateur) query.utilisateur = filters.utilisateur;
       if (filters.action) query.action = filters.action;
       if (filters.entite) query.entite = filters.entite;
       if (filters.entiteId) query.entiteId = filters.entiteId;
-      
+
       // Filtres de date
       if (filters.dateDebut || filters.dateFin) {
         query.createdAt = {};
         if (filters.dateDebut) query.createdAt.$gte = new Date(filters.dateDebut);
         if (filters.dateFin) query.createdAt.$lte = new Date(filters.dateFin);
       }
-      
+
       const logs = await AuditLog.find(query)
         .populate('utilisateur', 'nom prenom email role')
         .sort({ createdAt: -1 })
         .limit(limit)
         .skip((page - 1) * limit);
-      
+
       const total = await AuditLog.countDocuments(query);
-      
+
       return {
         logs,
         pagination: {
@@ -97,11 +97,11 @@ class AuditService {
         }
       };
     } catch (error) {
-      logger.error('Erreur récupération logs:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Récupérer les statistiques d'audit
    */
@@ -113,7 +113,7 @@ class AuditService {
         if (dateDebut) matchStage.createdAt.$gte = new Date(dateDebut);
         if (dateFin) matchStage.createdAt.$lte = new Date(dateFin);
       }
-      
+
       const stats = await AuditLog.aggregate([
         { $match: matchStage },
         {
@@ -124,7 +124,7 @@ class AuditService {
         },
         { $sort: { count: -1 } }
       ]);
-      
+
       const byEntite = await AuditLog.aggregate([
         { $match: matchStage },
         {
@@ -135,7 +135,7 @@ class AuditService {
         },
         { $sort: { count: -1 } }
       ]);
-      
+
       const byUser = await AuditLog.aggregate([
         { $match: matchStage },
         {
@@ -147,13 +147,13 @@ class AuditService {
         { $sort: { count: -1 } },
         { $limit: 10 }
       ]);
-      
+
       // Peupler les informations utilisateur
       await AuditLog.populate(byUser, {
         path: '_id',
         select: 'nom prenom email role'
       });
-      
+
       return {
         parAction: stats,
         parEntite: byEntite,
@@ -161,11 +161,11 @@ class AuditService {
         total: await AuditLog.countDocuments(matchStage)
       };
     } catch (error) {
-      logger.error('Erreur statistiques audit:', error);
+
       throw error;
     }
   }
-  
+
   /**
    * Nettoyer les anciens logs (RGPD)
    */
@@ -173,15 +173,15 @@ class AuditService {
     try {
       const dateLimit = new Date();
       dateLimit.setDate(dateLimit.getDate() - daysToKeep);
-      
+
       const result = await AuditLog.deleteMany({
         createdAt: { $lt: dateLimit }
       });
-      
-      logger.info(`${result.deletedCount} logs d'audit supprimés (> ${daysToKeep} jours)`);
+
+
       return result.deletedCount;
     } catch (error) {
-      logger.error('Erreur nettoyage logs:', error);
+
       throw error;
     }
   }

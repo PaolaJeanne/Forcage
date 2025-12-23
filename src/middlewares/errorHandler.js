@@ -2,7 +2,7 @@
 const { errorResponse } = require('../utils/response.util');
 
 const errorHandler = (err, req, res, next) => {
-  console.error('Error:', err);
+
 
   // Erreur de validation Mongoose
   if (err.name === 'ValidationError') {

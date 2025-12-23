@@ -1,7 +1,7 @@
 const NotificationUniversalService = require('../services/notification.service');
 
 class DocumentNotifications {
-  
+
   static async onDocumentUploaded(document, uploadedBy) {
     try {
       await NotificationUniversalService.notifyDocument({
@@ -12,7 +12,7 @@ class DocumentNotifications {
         declencheurId: uploadedBy,
         actionType: 'uploaded'
       });
-      
+
       // Notifier les personnes concernées si spécifié
       if (document.concerne && document.concerne.length > 0) {
         for (const concerneId of document.concerne) {
@@ -28,12 +28,12 @@ class DocumentNotifications {
           }
         }
       }
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications document uploadé:', error);
+
     }
   }
-  
+
   static async onDocumentValidated(document, validatedBy) {
     try {
       await NotificationUniversalService.notifyDocument({
@@ -44,12 +44,12 @@ class DocumentNotifications {
         declencheurId: validatedBy,
         actionType: 'validated'
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications document validé:', error);
+
     }
   }
-  
+
   static async onDocumentRejected(document, rejectedBy, reason) {
     try {
       await NotificationUniversalService.notifyDocument({
@@ -61,9 +61,9 @@ class DocumentNotifications {
         actionType: 'rejected',
         metadata: { rejectionReason: reason }
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur notifications document rejeté:', error);
+
     }
   }
 }

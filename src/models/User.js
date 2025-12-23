@@ -16,13 +16,13 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
   email: {
-  type: String,
-  required: [true, 'L\'email est requis'],
-  unique: true,      // Unique déjà présent
-  lowercase: true,
-  trim: true,
-  index: true       // Conservez cette ligne
-},
+    type: String,
+    required: [true, 'L\'email est requis'],
+    unique: true,      // Unique déjà présent
+    lowercase: true,
+    trim: true,
+    index: true       // Conservez cette ligne
+  },
 
   password: {
     type: String,
@@ -30,7 +30,7 @@ const userSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
-  
+
   // ============ GESTION DES RÔLES ============
   role: {
     type: String,
@@ -38,12 +38,12 @@ const userSchema = new mongoose.Schema({
     default: 'client',
     required: true
   },
-  
+
   // Limites d'autorisation (pour conseillers et responsables)
   limiteAutorisation: {
     type: Number,
-    default: function() {
-      switch(this.role) {
+    default: function () {
+      switch (this.role) {
         case 'conseiller': return 5000000;
         case 'rm': return 10000000;
         case 'dce': return 20000000;
@@ -54,33 +54,33 @@ const userSchema = new mongoose.Schema({
       }
     }
   },
-  
+
   // Informations métier
   telephone: {
     type: String,
     trim: true
   },
   numeroCompte: {
-  type: String,
-  unique: true,     // Unique déjà présent
-  sparse: true,     // Sparse déjà présent
-  uppercase: true,
-  trim: true,
-  index: true       // Conservez cette ligne
-},
+    type: String,
+    unique: true,     // Unique déjà présent
+    sparse: true,     // Sparse déjà présent
+    uppercase: true,
+    trim: true,
+    index: true       // Conservez cette ligne
+  },
   agence: {
     type: String,
     trim: true,
-    required: function() { return ['conseiller', 'rm', 'dce'].includes(this.role); }
+    required: function () { return ['conseiller', 'rm', 'dce'].includes(this.role); }
   },
-  
+
   // Classification client (si role = client)
   classification: {
     type: String,
     enum: ['normal', 'sensible', 'restructure', 'defaut'],
     default: 'normal'
   },
-  
+
   // Informations financières (si client)
   soldeActuel: {
     type: Number,
@@ -90,27 +90,27 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  
+
   // Scoring et notation
   notationClient: {
     type: String,
     enum: ['A', 'B', 'C', 'D', 'E'],
     default: 'C'
   },
-  
+
   // KYC
   kycValide: {
     type: Boolean,
     default: false
   },
   dateKyc: Date,
-  
+
   // Liste spéciale (27 clients SMP)
   listeSMP: {
     type: Boolean,
     default: false
   },
-  
+
   // Sécurité
   otpSecret: {
     type: String,
@@ -123,7 +123,7 @@ const userSchema = new mongoose.Schema({
   lastLogin: {
     type: Date
   },
-  
+
   // Audit
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -133,7 +133,7 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }
-  
+
 }, {
   timestamps: true
 });
@@ -152,12 +152,12 @@ userSchema.index({ createdAt: -1 });
 // ============================================
 
 // Hash du mot de passe avant la sauvegarde
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   // Ne hacher que si le password est modifié
   if (!this.isModified('password')) {
     return nextIfExists(next);
   }
-  
+
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -168,9 +168,9 @@ userSchema.pre('save', async function(next) {
 });
 
 // Middleware pour les updates (findOneAndUpdate, findByIdAndUpdate)
-userSchema.pre('findOneAndUpdate', async function(next) {
+userSchema.pre('findOneAndUpdate', async function (next) {
   const update = this.getUpdate();
-  
+
   if (update.password) {
     try {
       const salt = await bcrypt.genSalt(10);
@@ -186,22 +186,22 @@ userSchema.pre('findOneAndUpdate', async function(next) {
 });
 
 // Middleware pour formater les données avant sauvegarde
-userSchema.pre('save', function(next) {
+userSchema.pre('save', function (next) {
   // Formater l'email en lowercase
   if (this.isModified('email')) {
     this.email = this.email.toLowerCase().trim();
   }
-  
+
   // Formater le numéro de compte en majuscules
   if (this.isModified('numeroCompte') && this.numeroCompte) {
     this.numeroCompte = this.numeroCompte.toUpperCase().trim();
   }
-  
+
   // Nettoyer le téléphone
   if (this.isModified('telephone') && this.telephone) {
     this.telephone = this.telephone.replace(/\s/g, '');
   }
-  
+
   nextIfExists(next);
 });
 
@@ -210,17 +210,16 @@ userSchema.pre('save', function(next) {
 // ============================================
 
 // Méthode pour comparer les mots de passe (bcryptjs)
-userSchema.methods.comparePassword = async function(candidatePassword) {
+userSchema.methods.comparePassword = async function (candidatePassword) {
   try {
     return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {
-    console.error('❌ Erreur comparePassword:', error);
     return false;
   }
 };
 
 // Méthode pour vérifier si peut autoriser un montant
-userSchema.methods.peutAutoriser = function(montant) {
+userSchema.methods.peutAutoriser = function (montant) {
   if (['admin', 'adg', 'dga'].includes(this.role)) {
     return true;
   }
@@ -228,7 +227,7 @@ userSchema.methods.peutAutoriser = function(montant) {
 };
 
 // Méthode pour obtenir le prochain niveau hiérarchique
-userSchema.methods.getProchainNiveau = function() {
+userSchema.methods.getProchainNiveau = function () {
   const hierarchie = {
     'conseiller': 'rm',
     'rm': 'dce',
@@ -240,13 +239,13 @@ userSchema.methods.getProchainNiveau = function() {
 };
 
 // Méthode pour activer/désactiver l'utilisateur
-userSchema.methods.toggleActive = async function() {
+userSchema.methods.toggleActive = async function () {
   this.isActive = !this.isActive;
   return await this.save();
 };
 
 // Méthode pour obtenir le nom complet
-userSchema.virtual('fullName').get(function() {
+userSchema.virtual('fullName').get(function () {
   return `${this.prenom} ${this.nom}`;
 });
 
@@ -255,18 +254,18 @@ userSchema.virtual('fullName').get(function() {
 // ============================================
 
 // Trouver un utilisateur par email avec le mot de passe
-userSchema.statics.findByEmailWithPassword = function(email) {
+userSchema.statics.findByEmailWithPassword = function (email) {
   return this.findOne({ email: email.toLowerCase() }).select('+password');
 };
 
 // Vérifier si un email existe
-userSchema.statics.emailExists = async function(email) {
+userSchema.statics.emailExists = async function (email) {
   const user = await this.findOne({ email: email.toLowerCase() });
   return !!user;
 };
 
 // Vérifier si un numéro de compte existe
-userSchema.statics.accountNumberExists = async function(numeroCompte) {
+userSchema.statics.accountNumberExists = async function (numeroCompte) {
   const user = await this.findOne({ numeroCompte: numeroCompte.toUpperCase() });
   return !!user;
 };
@@ -274,14 +273,14 @@ userSchema.statics.accountNumberExists = async function(numeroCompte) {
 // ============================================
 // MÉTHODE TOJSON (masquer données sensibles)
 // ============================================
-userSchema.methods.toJSON = function() {
+userSchema.methods.toJSON = function () {
   const user = this.toObject();
-  
+
   // Supprimer les données sensibles
   delete user.password;
   delete user.otpSecret;
   delete user.__v;
-  
+
   return user;
 };
 

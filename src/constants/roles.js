@@ -135,10 +135,10 @@ module.exports = {
     VIEW_OWN_DEMANDE: ['client', 'conseiller', 'rm', 'dce', 'adg', 'dga', 'admin', 'risques'],
     CANCEL_OWN_DEMANDE: ['client'],
     
-    PROCESS_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'dga', 'admin'],
-    VALIDATE_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'dga', 'admin'],
-    REFUSE_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'dga', 'admin'],
-    ESCALATE_DEMANDE: ['conseiller', 'rm', 'dce'],
+    VALIDATE_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'admin', 'risques'],
+    REFUSE_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'admin', 'risques'],
+    ESCALATE_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'admin'],
+    PROCESS_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'admin', 'risques'],
     
     VIEW_ALL_DEMANDES: ['dce', 'adg', 'dga', 'risques', 'admin'],
     VIEW_TEAM_DEMANDES: ['conseiller', 'rm', 'dce', 'adg', 'dga', 'admin', 'risques'],

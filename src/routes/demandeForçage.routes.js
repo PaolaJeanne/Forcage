@@ -9,7 +9,7 @@ const { requirePermission, requireAuthorizationLimit } = require('../middlewares
 const { auditLogger } = require('../middlewares/audit.middleware');
 
 // IMPORT DES CONTRÔLEURS DEPUIS L'INDEX
-const { 
+const {
   creerDemande,
   listerDemandes,
   getDemande,
@@ -36,11 +36,9 @@ function getNotificationMiddleware() {
   try {
     return require('../middlewares/notification.middleware');
   } catch (error) {
-    console.log('⚠️ Middleware de notifications non trouvé, création de stub');
-    
+
     return {
       autoNotify: () => (req, res, next) => {
-        console.log('📝 Middleware autoNotify stub');
         next();
       },
       unreadCountMiddleware: () => (req, res, next) => next(),
@@ -56,7 +54,7 @@ async function handleMarkNotificationsAsRead(req, res) {
   try {
     const Notification = require('../models/Notification');
     const { id: demandeId } = req.params;
-    
+
     const result = await Notification.updateMany(
       {
         utilisateur: req.user.id,
@@ -71,7 +69,7 @@ async function handleMarkNotificationsAsRead(req, res) {
         }
       }
     );
-    
+
     res.json({
       success: true,
       message: 'Notifications marquées comme lues',
@@ -79,9 +77,8 @@ async function handleMarkNotificationsAsRead(req, res) {
         modifiedCount: result.modifiedCount
       }
     });
-    
+
   } catch (error) {
-    console.error('❌ Erreur marquage notifications:', error);
     res.status(500).json({
       success: false,
       message: 'Erreur lors du marquage des notifications',
@@ -96,29 +93,29 @@ async function handleGetDemandeNotifications(req, res) {
     const Notification = require('../models/Notification');
     const { id: demandeId } = req.params;
     const { limit = 20, page = 1 } = req.query;
-    
+
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     const [notifications, total] = await Promise.all([
       Notification.find({
         utilisateur: req.user.id,
         entite: 'demande',
         entiteId: demandeId
       })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean(),
-      
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+
       Notification.countDocuments({
         utilisateur: req.user.id,
         entite: 'demande',
         entiteId: demandeId
       })
     ]);
-    
+
     const totalPages = Math.ceil(total / parseInt(limit));
-    
+
     res.json({
       success: true,
       data: {
@@ -134,9 +131,8 @@ async function handleGetDemandeNotifications(req, res) {
         }
       }
     });
-    
+
   } catch (error) {
-    console.error('❌ Erreur récupération notifications:', error);
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des notifications',
@@ -162,7 +158,7 @@ router.post('/',
 );
 
 // Lister mes demandes
-router.get('/', 
+router.get('/',
   requirePermission('VIEW_OWN_DEMANDE'),
   listDemandesValidator,
   auditLogger('consultation', 'demande_list'),
@@ -170,14 +166,14 @@ router.get('/',
 );
 
 // Voir une demande
-router.get('/:id', 
+router.get('/:id',
   requirePermission('VIEW_OWN_DEMANDE'),
   auditLogger('consultation', 'demande'),
   getDemande  // ← Utilisation directe de la fonction importée
 );
 
 // Soumettre une demande
-router.patch('/:id/soumettre', 
+router.patch('/:id/soumettre',
   requirePermission('VIEW_OWN_DEMANDE'),
   auditLogger('soumission', 'demande'),
   notificationMiddleware.autoNotify('demande_soumission', 'demande'),
@@ -185,7 +181,7 @@ router.patch('/:id/soumettre',
 );
 
 // Annuler une demande
-router.patch('/:id/annuler', 
+router.patch('/:id/annuler',
   requirePermission('CANCEL_OWN_DEMANDE'),
   auditLogger('annulation', 'demande'),
   notificationMiddleware.autoNotify('demande_annulation', 'demande'),
@@ -193,7 +189,7 @@ router.patch('/:id/annuler',
 );
 
 // Modifier une demande
-router.put('/:id', 
+router.put('/:id',
   requirePermission('VIEW_OWN_DEMANDE'),
   auditLogger('modification', 'demande'),
   notificationMiddleware.autoNotify('demande_modification', 'demande'),
@@ -203,7 +199,7 @@ router.put('/:id',
 // ==================== ROUTES CONSEILLER/ÉQUIPE ====================
 
 // Demandes de l'équipe
-router.get('/team/demandes', 
+router.get('/team/demandes',
   requirePermission('VIEW_TEAM_DEMANDES'),
   listDemandesValidator,
   auditLogger('consultation', 'demande_team'),
@@ -213,7 +209,7 @@ router.get('/team/demandes',
 // ==================== ROUTES AGENCE (RM/DCE/ADG) ====================
 
 // Demandes de l'agence
-router.get('/agency/demandes', 
+router.get('/agency/demandes',
   requirePermission('VIEW_AGENCY_DEMANDES'),
   listDemandesValidator,
   auditLogger('consultation', 'demande_agency'),
@@ -223,7 +219,7 @@ router.get('/agency/demandes',
 // ==================== ROUTES ADMIN/TOUTES LES DEMANDES ====================
 
 // Toutes les demandes (DGA, Admin, Risques)
-router.get('/all/demandes', 
+router.get('/all/demandes',
   requirePermission('VIEW_ALL_DEMANDES'),
   listDemandesValidator,
   auditLogger('consultation', 'demande_all'),
@@ -231,7 +227,7 @@ router.get('/all/demandes',
 );
 
 // Statistiques
-router.get('/statistics', 
+router.get('/statistics',
   requirePermission('VIEW_STATISTICS'),
   auditLogger('consultation', 'statistiques'),
   getStatistiques  // ← Utilisation directe de la fonction importée
@@ -240,7 +236,7 @@ router.get('/statistics',
 // ==================== ROUTES TRAITEMENT ====================
 
 // Traiter une demande (valider/refuser)
-router.patch('/:id/traiter', 
+router.patch('/:id/traiter',
   requirePermission('PROCESS_DEMANDE'),
   requireAuthorizationLimit,
   updateStatutValidator,
@@ -250,7 +246,7 @@ router.patch('/:id/traiter',
 );
 
 // Remonter une demande
-router.patch('/:id/escalate', 
+router.patch('/:id/escalate',
   requirePermission('ESCALATE_DEMANDE'),
   auditLogger('remontee', 'demande'),
   notificationMiddleware.autoNotify('demande_remontee', 'demande'),
@@ -258,7 +254,7 @@ router.patch('/:id/escalate',
 );
 
 // Régulariser une demande
-router.patch('/:id/regulariser', 
+router.patch('/:id/regulariser',
   requirePermission('PROCESS_DEMANDE'),
   auditLogger('regularisation', 'demande'),
   notificationMiddleware.autoNotify('demande_regularisation', 'demande'),
@@ -268,13 +264,13 @@ router.patch('/:id/regulariser',
 // ==================== ROUTES DE NOTIFICATIONS ====================
 
 // Marquer une notification comme lue pour une demande
-router.patch('/:id/notifications/read', 
+router.patch('/:id/notifications/read',
   requirePermission('VIEW_OWN_DEMANDE'),
   handleMarkNotificationsAsRead
 );
 
 // Récupérer les notifications d'une demande
-router.get('/:id/notifications', 
+router.get('/:id/notifications',
   requirePermission('VIEW_OWN_DEMANDE'),
   handleGetDemandeNotifications
 );
@@ -291,14 +287,14 @@ router.get('/:id/status',
       const demande = await DemandeForçage.findById(req.params.id)
         .select('statut numeroReference createdAt updatedAt dateEcheance clientId')
         .lean();
-      
+
       if (!demande) {
         return res.status(404).json({
           success: false,
           message: 'Demande non trouvée'
         });
       }
-      
+
       // Vérifier les permissions
       if (req.user.role === 'client' && demande.clientId.toString() !== req.user.id) {
         return res.status(403).json({
@@ -306,7 +302,7 @@ router.get('/:id/status',
           message: 'Accès non autorisé'
         });
       }
-      
+
       res.json({
         success: true,
         data: {
@@ -314,13 +310,12 @@ router.get('/:id/status',
           numeroReference: demande.numeroReference,
           createdAt: demande.createdAt,
           updatedAt: demande.updatedAt,
-          joursRestants: demande.dateEcheance ? 
+          joursRestants: demande.dateEcheance ?
             Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null
         }
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur vérification statut:', error);
       res.status(500).json({
         success: false,
         message: 'Erreur serveur'
@@ -337,19 +332,19 @@ router.get('/:id/actions',
     try {
       const DemandeForçage = require('../models/DemandeForçage');
       const WorkflowService = require('../services/workflow.service');
-      
+
       const demande = await DemandeForçage.findById(req.params.id)
         .populate('clientId', 'notationClient')
         .select('statut montant clientId')
         .lean();
-      
+
       if (!demande) {
         return res.status(404).json({
           success: false,
           message: 'Demande non trouvée'
         });
       }
-      
+
       // Vérifier les permissions
       if (req.user.role === 'client' && demande.clientId._id.toString() !== req.user.id) {
         return res.status(403).json({
@@ -357,7 +352,7 @@ router.get('/:id/actions',
           message: 'Accès non autorisé'
         });
       }
-      
+
       const actions = WorkflowService.getAvailableActions(
         demande.statut,
         req.user.role,
@@ -365,7 +360,7 @@ router.get('/:id/actions',
         demande.clientId?.notationClient || 'C',
         req.user.role === 'client'
       );
-      
+
       res.json({
         success: true,
         data: {
@@ -376,9 +371,8 @@ router.get('/:id/actions',
           roleUtilisateur: req.user.role
         }
       });
-      
+
     } catch (error) {
-      console.error('❌ Erreur récupération actions:', error);
       res.status(500).json({
         success: false,
         message: 'Erreur serveur'

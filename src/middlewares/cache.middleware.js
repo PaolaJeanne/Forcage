@@ -7,15 +7,15 @@ const dashboardCache = (duration = 300) => {
     if (req.method !== 'GET') {
       return next();
     }
-    
+
     const key = `${req.originalUrl}_${req.user?.role}_${req.user?.id}`;
     const cachedResponse = cache.get(key);
-    
+
     if (cachedResponse) {
-      console.log('📦 Retour depuis le cache:', key);
+
       return res.json(cachedResponse);
     }
-    
+
     const originalJson = res.json.bind(res);
     res.json = (data) => {
       cache.set(key, data, duration);
@@ -23,7 +23,7 @@ const dashboardCache = (duration = 300) => {
       res.set('Cache-Control', `public, max-age=${duration}`);
       return originalJson(data);
     };
-    
+
     next();
   };
 };

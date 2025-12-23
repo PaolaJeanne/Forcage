@@ -1,8 +1,8 @@
 // src/controllers/demandeForçage.controller.js - VERSION ARRANGÉE
 const DemandeForçageService = require('../services/demandeForcage.service');
 const WorkflowService = require('../services/workflow.service');
-const { 
-  STATUTS_DEMANDE, 
+const {
+  STATUTS_DEMANDE,
   ACTIONS_DEMANDE,
   PRIORITES,
   NOTATIONS_CLIENT,
@@ -10,12 +10,12 @@ const {
 } = require('../constants/roles');
 const { validationResult } = require('express-validator');
 const { successResponse, errorResponse } = require('../utils/response.util');
-const logger = require('../utils/logger');
+
 const User = require('../models/User');
 const NotificationService = require('../services/notification.service');
 
 class DemandeForçageController {
-  
+
   // ==================== VARIABLES PRIVÉES ====================
   #DemandeForçage = null;
   #Notification = null;
@@ -36,8 +36,8 @@ class DemandeForçageController {
    */
   async creerDemande(req, res) {
     try {
-      console.log('\n📝 [WORKFLOW] Création demande - Début');
-      
+
+
       // Vérification rôle client
       if (req.user.role !== 'client') {
         return errorResponse(res, 403, 'Seuls les clients peuvent créer des demandes');
@@ -97,14 +97,14 @@ class DemandeForçageController {
 
       // Créer demande
       const nouvelleDemande = await this.#DemandeForçage.create(demandeData);
-      
+
       // Assigner conseiller
       await this.#assignerConseillerAutomatique(nouvelleDemande._id, demandeData.agenceId);
 
       // Notification
       await this.#notifierCreation(nouvelleDemande, req.user);
 
-      logger.info(`✅ Demande créée: ${nouvelleDemande.numeroReference} par ${req.user.email}`);
+
 
       // Réponse
       return successResponse(res, 201, 'Demande créée avec succès', {
@@ -134,8 +134,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-      console.error('❌ [WORKFLOW] Erreur création:', error);
-      logger.error('Erreur création demande:', error);
+
       return errorResponse(res, 500, 'Erreur lors de la création', error.message);
     }
   }
@@ -173,7 +172,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-      logger.error('Erreur listage demandes:', error);
+
       return errorResponse(res, 500, 'Erreur serveur', error.message);
     }
   }
@@ -222,107 +221,100 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-      logger.error('Erreur consultation demande:', error);
+
       return errorResponse(res, 404, error.message);
     }
   }
 
-/**
- * Soumettre une demande brouillon
- */
-async soumettreDemande(req, res) {
-  try {
-    console.log('\n📤 [WORKFLOW] Soumission demande - Début');
-    
-    const { id } = req.params;
-    const { commentaire } = req.body || {}; // <-- CORRECTION
-    
-    console.log('📝 Body reçu:', req.body);
-    console.log('💬 Commentaire extrait:', commentaire);
-    
-    // Récupérer demande
-    const demande = await this.#DemandeForçage.findById(id);
-    if (!demande) {
-      return errorResponse(res, 404, 'Demande non trouvée');
-    }
+  /**
+   * Soumettre une demande brouillon
+   */
+  async soumettreDemande(req, res) {
+    try {
 
-    console.log('📊 Détails demande:', {
-      numero: demande.numeroReference,
-      statut: demande.statut,
-      clientId: demande.clientId.toString(),
-      userId: req.user.id
-    });
 
-    // Vérifier permissions
-    if (!this.#peutSoumettreDemande(demande, req.user)) {
-      console.log('❌ Permission refusée pour soumission');
-      return errorResponse(res, 403, 'Vous n\'êtes pas autorisé à soumettre cette demande');
-    }
+      const { id } = req.params;
+      const { commentaire } = req.body || {}; // <-- CORRECTION
 
-    // Déterminer nouveau statut
-    const nouveauStatut = WorkflowService.getNextStatus(
-      ACTIONS_DEMANDE.SOUMETTRE,
-      demande.statut,
-      demande.montant,
-      req.user.role,
-      demande.notationClient || 'C',
-      demande.agenceId
-    );
 
-    console.log(`🔄 Transition: ${demande.statut} → ${nouveauStatut}`);
 
-    // Mettre à jour demande
-    const updated = await this.#mettreAJourStatutDemande(
-      id,
-      demande.statut,
-      nouveauStatut,
-      ACTIONS_DEMANDE.SOUMETTRE,
-      req.user.id,
-      commentaire || 'Demande soumise pour traitement', // <-- Ici commentaire peut être undefined
-      { dateSoumission: new Date() }
-    );
-
-    // Assigner conseiller si nécessaire
-    if (!updated.conseillerId) {
-      await this.#assignerConseillerAutomatique(updated._id, updated.agenceId);
-    }
-
-    // Notification
-    await this.#notifierSoumission(updated, req.user);
-
-    logger.info(`Demande soumise: ${updated.numeroReference} par ${req.user.email}`);
-
-    return successResponse(res, 200, 'Demande soumise avec succès', {
-      demande: {
-        id: updated._id,
-        numeroReference: updated.numeroReference,
-        statut: updated.statut,
-        updatedAt: updated.updatedAt,
-        conseiller: updated.conseillerId
-      },
-      workflowInfo: {
-        prochainesActions: WorkflowService.getAvailableActions(
-          nouveauStatut,
-          'conseiller',
-          updated.montant,
-          updated.notationClient || 'C'
-        ),
-        responsable: WorkflowService.getResponsibleRole(nouveauStatut),
-        delaiEstime: WorkflowService.calculatePriority(
-          updated.dateEcheance || new Date(),
-          updated.montant,
-          updated.notationClient || 'C',
-          updated.typeOperation
-        )
+      // Récupérer demande
+      const demande = await this.#DemandeForçage.findById(id);
+      if (!demande) {
+        return errorResponse(res, 404, 'Demande non trouvée');
       }
-    });
 
-  } catch (error) {
-    console.error('❌ [WORKFLOW] Erreur soumission:', error);
-    logger.error('Erreur soumission demande:', error);
-    return errorResponse(res, 500, 'Erreur soumission demande', error.message);
+
+
+      // Vérifier permissions
+      if (!this.#peutSoumettreDemande(demande, req.user)) {
+
+        return errorResponse(res, 403, 'Vous n\'êtes pas autorisé à soumettre cette demande');
+      }
+
+      // Déterminer nouveau statut
+      const nouveauStatut = WorkflowService.getNextStatus(
+        ACTIONS_DEMANDE.SOUMETTRE,
+        demande.statut,
+        demande.montant,
+        req.user.role,
+        demande.notationClient || 'C',
+        demande.agenceId
+      );
+
+
+
+      // Mettre à jour demande
+      const updated = await this.#mettreAJourStatutDemande(
+        id,
+        demande.statut,
+        nouveauStatut,
+        ACTIONS_DEMANDE.SOUMETTRE,
+        req.user.id,
+        commentaire || 'Demande soumise pour traitement', // <-- Ici commentaire peut être undefined
+        { dateSoumission: new Date() }
+      );
+
+      // Assigner conseiller si nécessaire
+      if (!updated.conseillerId) {
+        await this.#assignerConseillerAutomatique(updated._id, updated.agenceId);
+      }
+
+      // Notification
+      await this.#notifierSoumission(updated, req.user);
+
+
+
+      return successResponse(res, 200, 'Demande soumise avec succès', {
+        demande: {
+          id: updated._id,
+          numeroReference: updated.numeroReference,
+          statut: updated.statut,
+          updatedAt: updated.updatedAt,
+          conseiller: updated.conseillerId
+        },
+        workflowInfo: {
+          prochainesActions: WorkflowService.getAvailableActions(
+            nouveauStatut,
+            'conseiller',
+            updated.montant,
+            updated.notationClient || 'C'
+          ),
+          responsable: WorkflowService.getResponsibleRole(nouveauStatut),
+          delaiEstime: WorkflowService.calculatePriority(
+            updated.dateEcheance || new Date(),
+            updated.montant,
+            updated.notationClient || 'C',
+            updated.typeOperation
+          )
+        }
+      });
+
+    } catch (error) {
+
+      return errorResponse(res, 500, 'Erreur soumission demande', error.message);
+    }
   }
-}
 
   /**
    * Annuler une demande
@@ -331,9 +323,9 @@ async soumettreDemande(req, res) {
     try {
       const { id } = req.params;
       const { commentaire } = req.body || {};
-      
+
       const demande = await this.#DemandeForçage.findById(id);
-      
+
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
@@ -353,7 +345,7 @@ async soumettreDemande(req, res) {
         demande.agenceId
       );
 
-      console.log(`🔄 Annulation: ${demande.statut} → ${nouveauStatut}`);
+
 
       // Mettre à jour
       const updated = await this.#mettreAJourStatutDemande(
@@ -369,7 +361,7 @@ async soumettreDemande(req, res) {
       // Notification
       await this.#notifierAnnulation(updated, req.user);
 
-      logger.info(`Demande annulée: ${updated.numeroReference} par ${req.user.email}`);
+
 
       return successResponse(res, 200, 'Demande annulée avec succès', {
         demande: {
@@ -381,7 +373,7 @@ async soumettreDemande(req, res) {
       });
 
     } catch (error) {
-      logger.error('Erreur annulation demande:', error);
+
       return errorResponse(res, 400, error.message);
     }
   }
@@ -391,8 +383,8 @@ async soumettreDemande(req, res) {
    */
   async traiterDemande(req, res) {
     try {
-      console.log('\n⚡ [WORKFLOW] Traitement demande - Début');
-      
+
+
       const { id } = req.params;
       const { action, commentaire, montantAutorise } = req.body;
 
@@ -409,13 +401,7 @@ async soumettreDemande(req, res) {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
 
-      console.log('📋 Demande:', {
-        numero: demande.numeroReference,
-        statut: demande.statut,
-        montant: demande.montant,
-        notation: demande.notationClient,
-        client: demande.clientId?.email
-      });
+
 
       // Vérifier actions disponibles
       const isOwner = demande.clientId && demande.clientId._id.toString() === req.user.id.toString();
@@ -447,7 +433,7 @@ async soumettreDemande(req, res) {
         demande.agenceId
       );
 
-      console.log(`🔄 Transition: ${demande.statut} → ${nouveauStatut} (action: ${action})`);
+
 
       // Préparer données de mise à jour
       const updateData = {};
@@ -476,9 +462,9 @@ async soumettreDemande(req, res) {
       );
 
       // Notification
-      await this.#notifierTraitement(updated, nouveauStatut, req.user);
 
-      console.log(`✅ [WORKFLOW] Traitée: ${action} → ${nouveauStatut}`);
+
+
 
       return successResponse(res, 200, `Demande ${action.toLowerCase()} avec succès`, {
         demande: {
@@ -515,8 +501,7 @@ async soumettreDemande(req, res) {
       });
 
     } catch (error) {
-      console.error('❌ [WORKFLOW] Erreur traitement:', error);
-      logger.error('Erreur traitement demande:', error);
+
       return errorResponse(res, 500, 'Erreur traitement demande', error.message);
     }
   }
@@ -528,7 +513,7 @@ async soumettreDemande(req, res) {
     try {
       const { id } = req.params;
       const { commentaire } = req.body;
-      
+
       // Récupérer demande
       const demande = await this.#DemandeForçage.findById(id);
       if (!demande) {
@@ -542,7 +527,7 @@ async soumettreDemande(req, res) {
         demande.montant,
         demande.notationClient || 'C'
       );
-      
+
       if (!actionsDisponibles.includes(ACTIONS_DEMANDE.REMONTER)) {
         return errorResponse(res, 403, 'Vous ne pouvez pas remonter cette demande');
       }
@@ -557,7 +542,7 @@ async soumettreDemande(req, res) {
         demande.agenceId
       );
 
-      console.log(`⏫ Remontée: ${demande.statut} → ${nouveauStatut}`);
+
 
       // Mettre à jour
       const updated = await this.#mettreAJourStatutDemande(
@@ -573,7 +558,7 @@ async soumettreDemande(req, res) {
       // Notification
       await this.#notifierChangementStatut(updated, nouveauStatut, req.user);
 
-      logger.info(`Demande remontée: ${updated.numeroReference} par ${req.user.email}`);
+
 
       return successResponse(res, 200, 'Demande remontée au niveau supérieur', {
         demande: {
@@ -585,7 +570,7 @@ async soumettreDemande(req, res) {
       });
 
     } catch (error) {
-      logger.error('Erreur remontée demande:', error);
+
       return errorResponse(res, 400, error.message);
     }
   }
@@ -597,7 +582,7 @@ async soumettreDemande(req, res) {
     try {
       const { id } = req.params;
       const { commentaire } = req.body;
-      
+
       // Récupérer demande
       const demande = await this.#DemandeForçage.findById(id);
       if (!demande) {
@@ -611,7 +596,7 @@ async soumettreDemande(req, res) {
         demande.montant,
         demande.notationClient || 'C'
       );
-      
+
       if (!actionsDisponibles.includes(ACTIONS_DEMANDE.REGULARISER)) {
         return errorResponse(res, 403, 'Vous ne pouvez pas régulariser cette demande');
       }
@@ -626,7 +611,7 @@ async soumettreDemande(req, res) {
         demande.agenceId
       );
 
-      console.log(`💰 Régularisation: ${demande.statut} → ${nouveauStatut}`);
+
 
       // Mettre à jour
       const updated = await this.#mettreAJourStatutDemande(
@@ -636,7 +621,7 @@ async soumettreDemande(req, res) {
         ACTIONS_DEMANDE.REGULARISER,
         req.user.id,
         commentaire || `Demande régularisée par ${req.user.role}`,
-        { 
+        {
           regularisee: true,
           dateRegularisation: new Date()
         }
@@ -645,7 +630,7 @@ async soumettreDemande(req, res) {
       // Notification
       await this.#notifierRegularisation(updated, req.user);
 
-      logger.info(`Demande régularisée: ${updated.numeroReference} par ${req.user.email}`);
+
 
       return successResponse(res, 200, 'Demande régularisée avec succès', {
         demande: {
@@ -658,7 +643,7 @@ async soumettreDemande(req, res) {
       });
 
     } catch (error) {
-      logger.error('Erreur régularisation:', error);
+
       return errorResponse(res, 400, error.message);
     }
   }
@@ -669,7 +654,7 @@ async soumettreDemande(req, res) {
   async getStatistiques(req, res) {
     try {
       const filters = this.#construireFiltresStatistiques(req);
-      
+
       const stats = await DemandeForçageService.getStatistiques(filters);
 
       // Enrichir statistiques
@@ -684,7 +669,7 @@ async soumettreDemande(req, res) {
       });
 
     } catch (error) {
-      logger.error('Erreur statistiques:', error);
+
       return errorResponse(res, 500, 'Erreur serveur', error.message);
     }
   }
@@ -701,7 +686,7 @@ async soumettreDemande(req, res) {
 
       // Vérifier permissions
       const demande = await DemandeForçageService.getDemandeById(req.params.id);
-      
+
       if (demande.clientId._id.toString() !== req.user.id && req.user.role !== 'admin') {
         return errorResponse(res, 403, 'Seul le propriétaire ou un admin peut modifier');
       }
@@ -720,7 +705,7 @@ async soumettreDemande(req, res) {
       // Notification
       await this.#notifierModification(demandeMaj, req.user);
 
-      logger.info(`Demande mise à jour: ${demandeMaj.numeroReference} par ${req.user.email}`);
+
 
       return successResponse(res, 200, 'Demande mise à jour avec succès', {
         demande: {
@@ -734,7 +719,7 @@ async soumettreDemande(req, res) {
       });
 
     } catch (error) {
-      logger.error('Erreur mise à jour demande:', error);
+
       return errorResponse(res, 500, 'Erreur lors de la mise à jour', error.message);
     }
   }
@@ -781,7 +766,7 @@ async soumettreDemande(req, res) {
    */
   #traiterFichiersUpload(files) {
     const piecesJustificatives = [];
-    
+
     if (files && Array.isArray(files) && files.length > 0) {
       files.forEach(file => {
         piecesJustificatives.push({
@@ -818,7 +803,7 @@ async soumettreDemande(req, res) {
 
     // Générer référence
     const numeroReference = await this.#genererReference();
-    
+
     // Calculer notation et priorité
     const notationClient = client.notationClient || 'C';
     const priorite = WorkflowService.calculatePriority(
@@ -874,20 +859,19 @@ async soumettreDemande(req, res) {
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
       const prefix = `DF${year}${month}`;
-      
+
       const lastDemande = await this.#DemandeForçage.findOne({
         numeroReference: new RegExp(`^${prefix}`)
       }).sort({ numeroReference: -1 });
-      
+
       let sequence = 1;
       if (lastDemande && lastDemande.numeroReference) {
         const lastSeq = parseInt(lastDemande.numeroReference.slice(-4)) || 0;
         sequence = lastSeq + 1;
       }
-      
+
       return `${prefix}${String(sequence).padStart(4, '0')}`;
     } catch (error) {
-      console.error('❌ Erreur génération référence:', error);
       return `DF${Date.now().toString().slice(-8)}`;
     }
   }
@@ -902,22 +886,19 @@ async soumettreDemande(req, res) {
         agence: agence || 'Agence Centrale',
         isActive: true
       }).select('_id email');
-      
+
       if (conseiller) {
         await this.#DemandeForçage.findByIdAndUpdate(demandeId, {
           $set: { conseillerId: conseiller._id }
         });
-        
-        console.log(`👤 Conseiller assigné: ${conseiller.email} à la demande ${demandeId}`);
+
         await this.#notifierAssignationConseiller(demandeId, conseiller._id);
-        
+
         return conseiller;
       }
-      
-      console.log('⚠️ Aucun conseiller disponible pour cette agence');
+
       return null;
     } catch (error) {
-      console.error('❌ Erreur assignation conseiller:', error);
       return null;
     }
   }
@@ -927,7 +908,7 @@ async soumettreDemande(req, res) {
    */
   async #mettreAJourStatutDemande(demandeId, statutAvant, statutApres, action, userId, commentaire, updateData = {}) {
     const update = {
-      $set: { 
+      $set: {
         statut: statutApres,
         updatedAt: new Date(),
         ...updateData
@@ -955,53 +936,42 @@ async soumettreDemande(req, res) {
    * Construire filtres selon rôle
    */
   #construireFiltres(req) {
-  const { role, id: userId, agence, email } = req.user;
-  console.log(`🔍 Construction filtres pour: ${email} (${role})`);
-  
-  const filters = {};
-  
-  // Log pour debug
-  console.log('📊 User info:', { role, userId, agence });
-  
-  switch (role) {
-    case 'client':
-      console.log('👤 Filtre client: userId =', userId);
-      filters.clientId = userId;
-      break;
+    const { role, id: userId, agence, email } = req.user;
 
-    case 'conseiller':
-      console.log('👔 Filtre conseiller - TODO: implémenter relation clients');
-      
-      // TEMPORAIRE: Voir toutes les demandes SAUF les brouillons des autres
-      // Ou voir toutes pour debug
-      // filters = {}; // Option 1: Voir tout
-      
-      // Option 2: Voir seulement les demandes soumises ou plus
-      filters.statut = { 
-        $in: ['BROUILLON', 'SOUMIS', 'EN_ATTENTE', 'VALIDE', 'REFUSE', 'REGULARISE'] 
-      };
-      console.log('⚠️ Filtre temporaire - statut != BROUILLON');
-      break;
+    const filters = {};
 
-    case 'rm':
-    case 'dce':
-      console.log('🏢 Filtre agence:', agence);
-      filters.agence = agence;
-      break;
+    switch (role) {
+      case 'client':
+        filters.clientId = userId;
+        break;
 
-    case 'admin':
-    case 'dga':
-      console.log('👑 Pas de filtre - admin');
-      break;
+      case 'conseiller':
 
-    default:
-      console.log('❓ Rôle inconnu, filtre par défaut');
-      filters.clientId = userId;
+        // TEMPORAIRE: Voir toutes les demandes SAUF les brouillons des autres
+        // Ou voir toutes pour debug
+        // filters = {}; // Option 1: Voir tout
+
+        // Option 2: Voir seulement les demandes soumises ou plus
+        filters.statut = {
+          $in: ['BROUILLON', 'SOUMIS', 'EN_ATTENTE', 'VALIDE', 'REFUSE', 'REGULARISE']
+        };
+        break;
+
+      case 'rm':
+      case 'dce':
+        filters.agence = agence;
+        break;
+
+      case 'admin':
+      case 'dga':
+        break;
+
+      default:
+        filters.clientId = userId;
+    }
+
+    return filters;
   }
-
-  console.log('✅ Filtres construits:', JSON.stringify(filters, null, 2));
-  return filters;
-}
 
   /**
    * Construire options pagination/tri
@@ -1029,7 +999,7 @@ async soumettreDemande(req, res) {
         priorite: demande.priorite || 'NORMALE',
         createdAt: demande.createdAt,
         enRetard: demande.enRetard,
-        joursRestants: demande.dateEcheance ? 
+        joursRestants: demande.dateEcheance ?
           Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null
       };
 
@@ -1041,7 +1011,7 @@ async soumettreDemande(req, res) {
           prenom: demande.clientId.prenom,
           agence: demande.agenceId
         } : null;
-        
+
         if (['conseiller', 'rm', 'dce', 'admin', 'dga', 'adg', 'risques'].includes(role)) {
           base.conseiller = demande.conseillerId;
           base.notationClient = demande.notationClient || 'C';
@@ -1073,21 +1043,21 @@ async soumettreDemande(req, res) {
   #verifierPermissionDemande(demande, user) {
     // Admins voient tout
     if (['admin', 'dga', 'risques'].includes(user.role)) return true;
-    
+
     // Client voit ses demandes
     if (user.role === 'client' && demande.clientId._id.toString() === user.id) return true;
-    
+
     // Conseiller voit ses demandes assignées
     if (user.role === 'conseiller' && demande.conseillerId && demande.conseillerId._id.toString() === user.id) return true;
-    
+
     // RM/DCE voient les demandes de leur agence
     if (['rm', 'dce'].includes(user.role)) {
       return demande.agenceId === user.agence;
     }
-    
+
     // ADG peut voir toutes les demandes
     if (user.role === 'adg') return true;
-    
+
     return false;
   }
 
@@ -1106,7 +1076,7 @@ async soumettreDemande(req, res) {
       priorite: demande.priorite || 'NORMALE',
       createdAt: demande.createdAt,
       enRetard: demande.enRetard,
-      joursRestants: demande.dateEcheance ? 
+      joursRestants: demande.dateEcheance ?
         Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null
     };
 
@@ -1123,13 +1093,13 @@ async soumettreDemande(req, res) {
       base.client.telephone = demande.clientId.telephone;
       base.client.notationClient = demande.clientId.notationClient;
       base.client.classification = demande.clientId.classification;
-      
+
       base.agenceId = demande.agenceId;
       base.conseiller = demande.conseillerId;
       base.montantAutorise = demande.montantAutorise;
       base.dateEcheance = demande.dateEcheance;
       base.commentaireTraitement = demande.commentaireTraitement;
-      
+
       if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
         base.soldeActuel = demande.soldeActuel;
         base.decouvertAutorise = demande.decouvertAutorise;
@@ -1146,7 +1116,7 @@ async soumettreDemande(req, res) {
    */
   #peutSoumettreDemande(demande, user) {
     return demande.clientId.toString() === user.id.toString() &&
-           demande.statut === STATUTS_DEMANDE.BROUILLON;
+      demande.statut === STATUTS_DEMANDE.BROUILLON;
   }
 
   /**
@@ -1161,16 +1131,16 @@ async soumettreDemande(req, res) {
    */
   #construireFiltresStatistiques(req) {
     const filters = {};
-    
+
     if (req.user.role === 'client') {
       filters.clientId = req.user.id;
     }
-    
+
     if (req.query.dateDebut) filters.dateDebut = req.query.dateDebut;
     if (req.query.agenceId && ['admin', 'dga', 'adg', 'risques'].includes(req.user.role)) {
       filters.agenceId = req.query.agenceId;
     }
-    
+
     return filters;
   }
 
@@ -1179,26 +1149,28 @@ async soumettreDemande(req, res) {
    */
   async #enrichirStatistiques(stats, user) {
     const enrichies = { ...stats };
-    
+
     if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
       // Stats par agence
       const statsAgence = await this.#DemandeForçage.aggregate([
-        { $group: {
-          _id: '$agenceId',
-          total: { $sum: 1 },
-          montantTotal: { $sum: '$montant' }
-        }}
+        {
+          $group: {
+            _id: '$agenceId',
+            total: { $sum: 1 },
+            montantTotal: { $sum: '$montant' }
+          }
+        }
       ]);
-      
+
       enrichies.parAgence = statsAgence;
-      
+
       // Taux
       if (stats.total > 0) {
         enrichies.tauxValidation = (stats.validees / stats.total) * 100;
         enrichies.tauxRefus = (stats.refusees / stats.total) * 100;
       }
     }
-    
+
     return enrichies;
   }
 
@@ -1222,10 +1194,8 @@ async soumettreDemande(req, res) {
             typeOperation: demande.typeOperation
           }
         });
-        console.log('✅ Notification création envoyée');
       }
     } catch (error) {
-      console.error('⚠️ Erreur notification création:', error.message);
     }
   }
 
@@ -1244,7 +1214,6 @@ async soumettreDemande(req, res) {
         });
       }
     } catch (error) {
-      console.error('⚠️ Erreur notification soumission:', error.message);
     }
   }
 
@@ -1263,7 +1232,6 @@ async soumettreDemande(req, res) {
         });
       }
     } catch (error) {
-      console.error('⚠️ Erreur notification annulation:', error.message);
     }
   }
 
@@ -1282,7 +1250,6 @@ async soumettreDemande(req, res) {
         });
       }
     } catch (error) {
-      console.error('⚠️ Erreur notification modification:', error.message);
     }
   }
 
@@ -1305,7 +1272,6 @@ async soumettreDemande(req, res) {
         });
       }
     } catch (error) {
-      console.error('⚠️ Erreur notification régularisation:', error.message);
     }
   }
 
@@ -1313,7 +1279,7 @@ async soumettreDemande(req, res) {
     try {
       const demande = await this.#DemandeForçage.findById(demandeId);
       if (!demande) return;
-      
+
       await this.#Notification.create({
         utilisateur: conseillerId,
         type: 'demande_assignee',
@@ -1324,106 +1290,19 @@ async soumettreDemande(req, res) {
         lue: false,
         createdAt: new Date()
       });
-      
-      console.log(`📨 Notification assignation envoyée au conseiller ${conseillerId}`);
+
     } catch (error) {
-      console.error('❌ Erreur notification assignation:', error);
     }
   }
 
   async #notifierChangementStatut(demande, nouveauStatut, user) {
     try {
-      console.log(`📨 [NOTIFICATION] Changement statut: ${demande.statut} → ${nouveauStatut}`);
-      
-      const notifications = [];
-      
-      // Notifier le client
-      notifications.push({
-        utilisateur: demande.clientId,
-        type: 'demande_statut',
-        titre: `Demande ${demande.numeroReference}`,
-        message: `Statut changé: ${nouveauStatut}`,
-        entite: 'demande',
-        entiteId: demande._id,
-        lue: false,
-        createdAt: new Date()
-      });
-      
-      // Notifications spécifiques
-      switch(nouveauStatut) {
-        case STATUTS_DEMANDE.EN_ATTENTE_CONSEILLER:
-          if (demande.conseillerId) {
-            notifications.push({
-              utilisateur: demande.conseillerId,
-              type: 'demande_assignee',
-              titre: 'Nouvelle demande assignée',
-              message: `Demande ${demande.numeroReference} à traiter`,
-              entite: 'demande',
-              entiteId: demande._id,
-              lue: false,
-              createdAt: new Date()
-            });
-          }
-          break;
-          
-        case STATUTS_DEMANDE.EN_ATTENTE_RM:
-          const rm = await User.findOne({ 
-            role: 'rm', 
-            agence: demande.agenceId 
-          });
-          if (rm) {
-            notifications.push({
-              utilisateur: rm._id,
-              type: 'demande_remontee',
-              titre: 'Demande à valider',
-              message: `Demande ${demande.numeroReference} remontée pour validation`,
-              entite: 'demande',
-              entiteId: demande._id,
-              lue: false,
-              createdAt: new Date()
-            });
-          }
-          break;
-          
-        case STATUTS_DEMANDE.APPROUVEE:
-          if (demande.conseillerId) {
-            notifications.push({
-              utilisateur: demande.conseillerId,
-              type: 'demande_approuvee',
-              titre: 'Demande approuvée',
-              message: `Demande ${demande.numeroReference} approuvée`,
-              entite: 'demande',
-              entiteId: demande._id,
-              lue: false,
-              createdAt: new Date()
-            });
-          }
-          break;
-          
-        case STATUTS_DEMANDE.REJETEE:
-          if (demande.conseillerId) {
-            notifications.push({
-              utilisateur: demande.conseillerId,
-              type: 'demande_rejetee',
-              titre: 'Demande rejetée',
-              message: `Demande ${demande.numeroReference} rejetée`,
-              entite: 'demande',
-              entiteId: demande._id,
-              lue: false,
-              createdAt: new Date()
-            });
-          }
-          break;
-      }
-      
       // Envoyer notifications
       if (notifications.length > 0) {
         await this.#Notification.insertMany(notifications);
-        console.log(`✅ ${notifications.length} notifications envoyées`);
       }
-      
+
     } catch (error) {
-      console.error('❌ [NOTIFICATION] Erreur:', error);
     }
   }
 }
