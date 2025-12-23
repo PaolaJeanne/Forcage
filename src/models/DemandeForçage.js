@@ -1,143 +1,359 @@
-// ============================================
-// 1. MODEL - models/DemandeForçage.js
-// ============================================
+// src/models/DemandeForçage.js - VERSION CORRIGÉE
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+const { 
+  STATUTS_DEMANDE, 
+  NOTATIONS_CLIENT, 
+  PRIORITES, 
+  SCORES_RISQUE,
+  TYPES_OPERATION,
+  DEVISE
+} = require('../constants/roles');
 
-// ✅ NETTOYER LE CACHE MONGOOSE COMPLÈTEMENT
-delete mongoose.connection.models['DemandeForçage'];
-delete mongoose.models.DemandeForçage;
-
-// ✅ Sous-schéma explicite pour les pièces justificatives
-const pieceJustificativeSchema = new mongoose.Schema({
-  nom: String,
-  url: String,
-  type: String,
-  taille: Number,
-  uploadedAt: { type: Date, default: Date.now }
-}, { _id: false });
-
-const demandeForçageSchema = new mongoose.Schema({
-  numeroReference: {
+// Schéma pour les pièces justificatives
+const PieceJustificativeSchema = new Schema({
+  nom: {
     type: String,
     required: true,
-    unique: true,
-    index: true
+    trim: true
   },
-  clientId: {
-    type: mongoose.Schema.Types.ObjectId,
+  url: {
+    type: String,
+    required: true
+  },
+  type: {
+    type: String,
+    required: true
+  },
+  taille: {
+    type: Number,
+    required: true
+  },
+  uploadedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Schéma pour l'historique
+const HistoriqueEntrySchema = new Schema({
+  action: {
+    type: String,
+    required: true
+  },
+  statutAvant: {
+    type: String,
+    enum: Object.values(STATUTS_DEMANDE)
+  },
+  statutApres: {
+    type: String,
+    enum: Object.values(STATUTS_DEMANDE),
+    required: true
+  },
+  userId: {
+    type: Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-  compteNumero: {
+  commentaire: String,
+  timestamp: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Schéma principal
+const DemandeForçageSchema = new Schema({
+  // Références
+  numeroReference: {
     type: String,
+    unique: true,
+    required: true,
+    index: true
+  },
+  clientId: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
     required: true
   },
-  typeOperation: {
+  conseillerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  agenceId: {
     type: String,
-    enum: ['VIREMENT', 'PRELEVEMENT', 'CHEQUE', 'CARTE', 'RETRAIT', 'AUTRE'],
-    required: true
+    default: 'Agence Centrale'
+  },
+  
+  // Informations demande
+  motif: {
+    type: String,
+    required: true,
+    trim: true
   },
   montant: {
     type: Number,
     required: true,
-    min: 0
+    min: 10000, // Minimum 10.000 FCFA
+    max: 100000000 // Maximum 100.000.000 FCFA
   },
-  motif: {
+  montantAutorise: Number,
+  typeOperation: {
     type: String,
-    required: true,
-    minlength: 10,
-    maxlength: 500
+    enum: TYPES_OPERATION,
+    default: 'VIREMENT'
   },
-  soldeActuel: Number,
-  decouvertAutorise: Number,
-  montantForçageTotal: Number,
+  compteNumero: String,
+  compteDebit: String,
+  devise: {
+    type: String,
+    enum: DEVISE,
+    default: 'XAF'
+  },
+  
+  // Évaluation et notation
+  notationClient: {
+    type: String,
+    enum: NOTATIONS_CLIENT,
+    default: 'C'
+  },
+  classification: {
+    type: String,
+    enum: ['normal', 'premium', 'entreprise'],
+    default: 'normal'
+  },
+  scoreRisque: {
+    type: String,
+    enum: SCORES_RISQUE,
+    default: 'MOYEN'
+  },
+  priorite: {
+    type: String,
+    enum: PRIORITES,
+    default: 'NORMALE'
+  },
+  
+  // Informations comptables
+  soldeActuel: {
+    type: Number,
+    default: 0
+  },
+  decouvertAutorise: {
+    type: Number,
+    default: 0
+  },
+  montantForçageTotal: {
+    type: Number,
+    default: 0
+  },
+  
+  // Workflow et statut
   statut: {
     type: String,
-    enum: ['BROUILLON', 'ENVOYEE', 'EN_ETUDE', 'EN_VALIDATION', 'VALIDEE', 'REFUSEE', 'ANNULEE'],
-    default: 'BROUILLON'
+    enum: Object.values(STATUTS_DEMANDE),
+    default: STATUTS_DEMANDE.BROUILLON,
+    index: true
   },
-  conseillerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  dateSoumission: Date,
+  dateValidation: Date,
+  dateDecaissement: Date,
+  dateRegularisation: Date,
+  dateAnnulation: Date,
+  dateEcheance: {
+    type: Date,
+    required: true
   },
-  responsableId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  
+  // Validation hiérarchique
+  validePar_conseiller: {
+    userId: Schema.Types.ObjectId,
+    date: Date,
+    commentaire: String
   },
-  dateTraitement: Date,
+  validePar_rm: {
+    userId: Schema.Types.ObjectId,
+    date: Date,
+    commentaire: String
+  },
+  validePar_dce: {
+    userId: Schema.Types.ObjectId,
+    date: Date,
+    commentaire: String
+  },
+  validePar_adg: {
+    userId: Schema.Types.ObjectId,
+    date: Date,
+    commentaire: String
+  },
+  
+  // Documents
+  piecesJustificatives: [PieceJustificativeSchema],
+  commentaireInterne: String,
   commentaireTraitement: String,
-  montantAutorise: Number,
-  dateEcheance: Date,
   conditionsParticulieres: String,
   
-  // ✅ UTILISER LE SOUS-SCHÉMA
-  piecesJustificatives: [pieceJustificativeSchema],
-  
-  dateRegularisation: Date,
+  // Suivi
   regularisee: {
     type: Boolean,
     default: false
   },
-  scoreRisque: {
-    type: String,
-    enum: ['FAIBLE', 'MOYEN', 'ELEVE', 'CRITIQUE'],
-    default: 'MOYEN'
+  enRetard: {
+    type: Boolean,
+    default: false
   },
-  notationClient: String,
-  historique: [{
-    action: String,
-    statutAvant: String,
-    statutApres: String,
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    commentaire: String,
-    timestamp: { type: Date, default: Date.now }
-  }],
-  agenceId: String,
-  priorite: {
-    type: String,
-    enum: ['NORMALE', 'URGENTE'],
-    default: 'NORMALE'
-  },
-  compteDebit: String,
-  devise: { type: String, default: 'XAF' },
-  commentaireInterne: String,
-  classification: String
+  
+  // Historique complet
+  historique: [HistoriqueEntrySchema]
+  
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });
 
-// Indexes
-demandeForçageSchema.index({ clientId: 1, statut: 1 });
-demandeForçageSchema.index({ conseillerId: 1, statut: 1 });
-demandeForçageSchema.index({ createdAt: -1 });
+// Index composites
+DemandeForçageSchema.index({ clientId: 1, createdAt: -1 });
+DemandeForçageSchema.index({ conseillerId: 1, statut: 1 });
+DemandeForçageSchema.index({ agenceId: 1, createdAt: -1 });
+DemandeForçageSchema.index({ statut: 1, dateEcheance: 1 });
 
-// Virtual
-demandeForçageSchema.virtual('enRetard').get(function() {
-  if (this.statut === 'VALIDEE' && this.dateEcheance && !this.regularisee) {
-    return new Date() > this.dateEcheance;
+// Méthode statique pour générer le numéro de référence
+DemandeForçageSchema.statics.generateNextReference = async function() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const prefix = `DF${year}${month}`;
+  
+  const lastDemande = await this.findOne({
+    numeroReference: new RegExp(`^${prefix}`)
+  }).sort({ numeroReference: -1 });
+  
+  let nextNumber = 1;
+  if (lastDemande && lastDemande.numeroReference) {
+    const lastNumber = parseInt(lastDemande.numeroReference.slice(-4));
+    nextNumber = lastNumber + 1;
   }
-  return false;
-});
+  
+  return `${prefix}${String(nextNumber).padStart(4, '0')}`;
+};
 
-// Méthode
-demandeForçageSchema.methods.ajouterHistorique = function(action, userId, commentaire = '') {
-  this.historique.push({
+// Méthodes d'instance
+DemandeForçageSchema.methods.calculateDaysRemaining = function() {
+  if (!this.dateEcheance) return null;
+  const now = new Date();
+  const diffTime = this.dateEcheance - now;
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
+
+DemandeForçageSchema.methods.isUrgent = function() {
+  const daysRemaining = this.calculateDaysRemaining();
+  return this.priorite === 'URGENTE' || (daysRemaining !== null && daysRemaining <= 2);
+};
+
+DemandeForçageSchema.methods.canBeProcessedBy = function(user) {
+  // Logique de permission selon le rôle et le statut
+  const userRole = user.role;
+  const currentStatus = this.statut;
+  
+  switch(userRole) {
+    case 'client':
+      return currentStatus === STATUTS_DEMANDE.BROUILLON && 
+             this.clientId.toString() === user.id.toString();
+      
+    case 'conseiller':
+      return [STATUTS_DEMANDE.EN_ATTENTE_CONSEILLER, STATUTS_DEMANDE.EN_ETUDE_CONSEILLER].includes(currentStatus) &&
+             (this.conseillerId?.toString() === user.id.toString() || user.agence === this.agenceId);
+      
+    case 'rm':
+      return currentStatus === STATUTS_DEMANDE.EN_ATTENTE_RM && 
+             user.agence === this.agenceId;
+      
+    case 'dce':
+      return currentStatus === STATUTS_DEMANDE.EN_ATTENTE_DCE && 
+             user.region === this.agenceId;
+      
+    case 'adg':
+      return currentStatus === STATUTS_DEMANDE.EN_ATTENTE_ADG;
+      
+    case 'risques':
+      return currentStatus === STATUTS_DEMANDE.EN_ANALYSE_RISQUES;
+      
+    case 'admin':
+    case 'dga':
+      return true;
+      
+    default:
+      return false;
+  }
+};
+
+DemandeForçageSchema.methods.addHistoryEntry = function(action, userId, commentaire = '') {
+  const entry = {
     action,
     statutAvant: this.statut,
     statutApres: this.statut,
     userId,
-    commentaire
+    commentaire,
+    timestamp: new Date()
+  };
+  
+  this.historique.push(entry);
+  return this;
+};
+
+// Méthodes statiques
+DemandeForçageSchema.statics.findEnRetard = function() {
+  const now = new Date();
+  return this.find({
+    dateEcheance: { $lt: now },
+    statut: { 
+      $nin: [
+        STATUTS_DEMANDE.REGULARISEE, 
+        STATUTS_DEMANDE.REJETEE, 
+        STATUTS_DEMANDE.ANNULEE,
+        STATUTS_DEMANDE.DECAISSEE
+      ] 
+    },
+    enRetard: false
   });
 };
 
-// ✅ Export simple
-const DemandeForçage = mongoose.model("DemandeForçage", demandeForçageSchema);
+DemandeForçageSchema.statics.getStatsByPeriod = function(startDate, endDate, agenceId = null) {
+  const match = {
+    createdAt: {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate)
+    }
+  };
+  
+  if (agenceId) {
+    match.agenceId = agenceId;
+  }
+  
+  return this.aggregate([
+    { $match: match },
+    { $group: {
+      _id: {
+        $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+      },
+      count: { $sum: 1 },
+      totalMontant: { $sum: "$montant" },
+      validees: {
+        $sum: { $cond: [{ $in: ["$statut", ["APPROUVEE", "DECAISSEE"]] }, 1, 0] }
+      }
+    }},
+    { $sort: { _id: 1 } }
+  ]);
+};
 
-//module.exports = DemandeForçage;
+// Virtuals
+DemandeForçageSchema.virtual('joursRestants').get(function() {
+  return this.calculateDaysRemaining();
+});
 
-module.exports =
-  mongoose.models.DemandeForçage ||
-  mongoose.model("DemandeForçage", demandeForçageSchema);
+DemandeForçageSchema.virtual('estExpiree').get(function() {
+  const daysRemaining = this.calculateDaysRemaining();
+  return daysRemaining !== null && daysRemaining < 0;
+});
 
+module.exports = mongoose.model('DemandeForçage', DemandeForçageSchema);

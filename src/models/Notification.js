@@ -9,10 +9,47 @@ const notificationSchema = new mongoose.Schema({
     index: true
   },
   
-  // Type de notification (peut être étendu)
+  // Type de notification - CORRIGÉ
   type: {
     type: String,
-    enum: ['info', 'warning', 'success', 'error', 'urgent', 'system'],
+    enum: [
+      // Notifications générales
+      'info', 
+      'warning', 
+      'success', 
+      'error', 
+      'urgent', 
+      'system',
+      
+      // Notifications spécifiques aux demandes
+      'demande_creation',
+      'demande_soumission',
+      'demande_modification',
+      'demande_annulation',
+      'demande_assignee',
+      'demande_statut',
+      'demande_remontee',
+      'demande_approuvee',
+      'demande_rejetee',
+      'demande_regularisation',
+      'demande_echeance',
+      'demande_retour',
+      
+      // Notifications chat
+      'message',
+      'conversation',
+      'mention',
+      
+      // Notifications documents
+      'document_upload',
+      'document_validation',
+      'document_rejet',
+      
+      // Notifications tâches
+      'tache_assignee',
+      'tache_terminee',
+      'tache_retard'
+    ],
     default: 'info'
   },
   
@@ -111,7 +148,6 @@ const notificationSchema = new mongoose.Schema({
   metadata: {
     type: mongoose.Schema.Types.Mixed,
     default: {},
-    // Pas de schéma strict pour être flexible
   },
   
   // Priorité
@@ -184,7 +220,7 @@ const notificationSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Index composés pour les requêtes courantes
+// Index composés
 notificationSchema.index({ utilisateur: 1, lue: 1, createdAt: -1 });
 notificationSchema.index({ utilisateur: 1, categorie: 1, lue: 1 });
 notificationSchema.index({ utilisateur: 1, entite: 1, entiteId: 1 });
@@ -197,21 +233,6 @@ notificationSchema.methods.marquerCommeLue = async function() {
   this.lueAt = new Date();
   await this.save();
   return this;
-};
-
-// Méthode pour renvoyer la notification
-notificationSchema.methods.renvoyer = async function() {
-  const nouvelleNotification = this.toObject();
-  delete nouvelleNotification._id;
-  delete nouvelleNotification.lue;
-  delete nouvelleNotification.lueAt;
-  delete nouvelleNotification.createdAt;
-  delete nouvelleNotification.updatedAt;
-  
-  nouvelleNotification.createdAt = new Date();
-  nouvelleNotification.updatedAt = new Date();
-  
-  return mongoose.model('Notification').create(nouvelleNotification);
 };
 
 // Méthode pour obtenir le lien de l'entité
@@ -278,14 +299,13 @@ notificationSchema.statics.compterNonLues = async function(userId, filters = {})
 notificationSchema.statics.nettoyerExpirees = async function() {
   return this.deleteMany({
     expiresAt: { $lt: new Date() },
-    priorite: { $ne: 'critique' } // Ne pas supprimer les critiques
+    priorite: { $ne: 'critique' }
   });
 };
 
-// Virtual pour les données de l'entité (peuplement à la demande)
+// Virtual pour les données de l'entité
 notificationSchema.virtual('donneesEntite', {
   ref: function() {
-    // Déterminer le modèle basé sur l'entité
     const modelMap = {
       message: 'Message',
       conversation: 'Conversation',

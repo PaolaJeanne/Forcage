@@ -7,6 +7,8 @@
     "dev": "nodemon src/app.js",
     "clean-admin": "node src/scripts/createCleanAdmin.js",
       "clean:db": "node scripts/cleanDatabase.js",
+         "migrate": "node src/scripts/migrate-demandes.js",
+    "reset-db": "node src/scripts/reset-database.js",
       "token:generate": "node scripts/generateToken.js"
 
   },
