@@ -121,6 +121,108 @@ class NotificationTemplateService {
           numeroReference: 'DF2025120001',
           dateEcheance: '31/12/2025'
         }
+      },
+      // ========== TEMPLATES WORKFLOW ==========
+      {
+        code: 'WORKFLOW_VALIDATION',
+        nom: 'Validation workflow',
+        description: 'Notifie une validation dans le workflow',
+        type: 'success',
+        categorie: 'workflow',
+        titreTemplate: '✅ Validation - {{numeroReference}}',
+        messageTemplate: 'La demande a été validée par {{validateurRole}}. Nouveau statut: {{nouveauStatut}}',
+        destinataireRoles: ['client', 'conseiller', 'admin'],
+        priorite: 'normale',
+        exempleVariables: {
+          numeroReference: 'DF2025120001',
+          validateurRole: 'RM',
+          nouveauStatut: 'EN_ATTENTE_DCE'
+        }
+      },
+      {
+        code: 'WORKFLOW_ESCALATION',
+        nom: 'Escalade workflow',
+        description: 'Notifie une escalade dans le workflow',
+        type: 'info',
+        categorie: 'workflow',
+        titreTemplate: '📤 Escalade - {{numeroReference}}',
+        messageTemplate: 'La demande a été escaladée à {{nouveauNiveau}}',
+        destinataireRoles: ['conseiller', 'rm', 'dce', 'adg', 'risques'],
+        priorite: 'normale',
+        exempleVariables: {
+          numeroReference: 'DF2025120001',
+          nouveauNiveau: 'DCE'
+        }
+      },
+      {
+        code: 'WORKFLOW_RETURN',
+        nom: 'Retour workflow',
+        description: 'Notifie un retour pour complément',
+        type: 'warning',
+        categorie: 'workflow',
+        titreTemplate: '↩️ Retour - {{numeroReference}}',
+        messageTemplate: 'La demande a été retournée pour complément',
+        destinataireRoles: ['client', 'conseiller'],
+        priorite: 'haute',
+        exempleVariables: {
+          numeroReference: 'DF2025120001'
+        }
+      },
+      {
+        code: 'WORKFLOW_ANALYSIS_REQUIRED',
+        nom: 'Analyse requise',
+        description: 'Notifie qu\'une analyse est requise',
+        type: 'warning',
+        categorie: 'workflow',
+        titreTemplate: '🔍 Analyse requise - {{numeroReference}}',
+        messageTemplate: 'Cette demande nécessite une analyse par le service risques',
+        destinataireRoles: ['risques'],
+        priorite: 'haute',
+        exempleVariables: {
+          numeroReference: 'DF2025120001'
+        }
+      },
+      {
+        code: 'WORKFLOW_DELAY',
+        nom: 'Retard workflow',
+        description: 'Notifie un retard dans le traitement',
+        type: 'error',
+        categorie: 'workflow',
+        titreTemplate: '⏰ Retard - {{numeroReference}}',
+        messageTemplate: 'Cette demande dépasse le délai de traitement',
+        destinataireRoles: ['conseiller', 'rm', 'dce', 'adg', 'admin'],
+        priorite: 'urgente',
+        exempleVariables: {
+          numeroReference: 'DF2025120001'
+        }
+      },
+      {
+        code: 'WORKFLOW_ASSIGNMENT',
+        nom: 'Assignation workflow',
+        description: 'Notifie une nouvelle assignation',
+        type: 'info',
+        categorie: 'workflow',
+        titreTemplate: '👤 Assignation - {{numeroReference}}',
+        messageTemplate: 'Vous avez été assigné à cette demande',
+        destinataireRoles: ['conseiller'],
+        priorite: 'normale',
+        exempleVariables: {
+          numeroReference: 'DF2025120001'
+        }
+      },
+      {
+        code: 'WORKFLOW_COMPLETION',
+        nom: 'Completion workflow',
+        description: 'Notifie la complétion du workflow',
+        type: 'success',
+        categorie: 'workflow',
+        titreTemplate: '🏁 Complété - {{numeroReference}}',
+        messageTemplate: 'Le workflow de cette demande est terminé',
+        destinataireRoles: ['client', 'conseiller', 'admin'],
+        priorite: 'normale',
+        exempleVariables: {
+          numeroReference: 'DF2025120001'
+        }
       }
     ];
   }
@@ -147,6 +249,7 @@ class NotificationTemplateService {
       actif: true
     });
   }
-}
 
+
+}
 module.exports = NotificationTemplateService;

@@ -1,3 +1,4 @@
+// src/middlewares/role.middleware.js
 const { errorResponse } = require('../utils/response.util');
 
 exports.authorize = (roles = []) => (req, res, next) => {
@@ -6,3 +7,6 @@ exports.authorize = (roles = []) => (req, res, next) => {
   }
   next();
 };
+
+// Ajouter checkRole comme alias de authorize
+exports.checkRole = exports.authorize;

@@ -936,42 +936,48 @@ class DemandeForçageController {
    * Construire filtres selon rôle
    */
   #construireFiltres(req) {
-    const { role, id: userId, agence, email } = req.user;
+  const { role, id: userId, agence, email } = req.user;
 
-    const filters = {};
+  const filters = {};
 
-    switch (role) {
-      case 'client':
-        filters.clientId = userId;
-        break;
+  switch (role) {
+    case 'client':
+      filters.clientId = userId;
+      break;
 
-      case 'conseiller':
+    case 'conseiller':
+      // Option 1: Le conseiller voit les demandes qui lui sont assignées
+      filters.conseillerId = userId;
+      
+      // Option 2: OU les demandes de son agence qui sont en attente
+      // filters.$or = [
+      //   { conseillerId: userId },
+      //   { 
+      //     $and: [
+      //       { agenceId: agence },
+      //       { statut: { $in: ['EN_ATTENTE_CONSEILLER', 'EN_ETUDE_CONSEILLER'] } }
+      //     ]
+      //   }
+      // ];
+      break;
 
-        // TEMPORAIRE: Voir toutes les demandes SAUF les brouillons des autres
-        // Ou voir toutes pour debug
-        // filters = {}; // Option 1: Voir tout
+    case 'rm':
+    case 'dce':
+      filters.agenceId = agence; // Note: Le champ est agenceId, pas agence
+      break;
 
-        // Option 2: Voir seulement les demandes soumises ou plus
-        filters.statut = {
-          $in: ['BROUILLON', 'SOUMIS', 'EN_ATTENTE', 'VALIDE', 'REFUSE', 'REGULARISE']
-        };
-        break;
+    case 'admin':
+    case 'dga':
+    case 'risques':
+      // Pas de filtre - voient tout
+      break;
 
-      case 'rm':
-      case 'dce':
-        filters.agence = agence;
-        break;
-
-      case 'admin':
-      case 'dga':
-        break;
-
-      default:
-        filters.clientId = userId;
-    }
-
-    return filters;
+    default:
+      filters.clientId = userId;
   }
+
+  return filters;
+}
 
   /**
    * Construire options pagination/tri

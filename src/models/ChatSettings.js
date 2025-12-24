@@ -1,4 +1,4 @@
-// src/models/ChatArchive.js
+// src/models/ChatArchive.js - VERSION CORRIGÉE
 const mongoose = require('mongoose');
 
 const chatArchiveSchema = new mongoose.Schema({
@@ -6,8 +6,7 @@ const chatArchiveSchema = new mongoose.Schema({
   conversationId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Conversation',
-    required: true,
-    index: true
+    required: true
   },
   
   // Données de la conversation
@@ -38,14 +37,12 @@ const chatArchiveSchema = new mongoose.Schema({
   // Date d'archivage
   archivedAt: {
     type: Date,
-    default: Date.now,
-    index: true
+    default: Date.now
   },
   
   // Date d'expiration (pour l'archivage automatique)
   expiresAt: {
-    type: Date,
-    index: true
+    type: Date
   },
   
   // Métadonnées
@@ -54,8 +51,12 @@ const chatArchiveSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index pour le nettoyage automatique
-chatArchiveSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+chatArchiveSchema.index({ conversationId: 1 }); // Pour les recherches par conversation
+chatArchiveSchema.index({ archivedAt: -1 });    // Pour le tri par date d'archivage
+chatArchiveSchema.index({ expiresAt: 1 });      // Pour le TTL (expiration automatique)
+chatArchiveSchema.index({ archivedBy: 1 });     // Pour les recherches par archiveur
+chatArchiveSchema.index({ reason: 1, archivedAt: -1 }); // Pour les statistiques
+chatArchiveSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // Pour le nettoyage automatique
 
 // Méthode statique pour archiver une conversation
 chatArchiveSchema.statics.archiveConversation = async function(conversationId, options = {}) {

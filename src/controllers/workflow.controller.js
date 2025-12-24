@@ -1,13 +1,15 @@
-// src/controllers/workflow.controller.js
+// src/controllers/workflow.controller.js - VERSION NOTIFICATIONS INTÉGRÉES
 const DemandeForçage = require('../models/DemandeForçage');
 const User = require('../models/User');
 const AuditService = require('../services/audit.service');
+const WorkflowIntegrator = require('../services/WorkflowIntegrator');
+const WorkflowService = require('../services/workflow.service');
+const WorkflowNotificationService = require('../services/workflowNotificationService');
 
 class WorkflowController {
 
   /**
-   * VALIDER une demande
-   * Route: PATCH /api/v1/demandes/:id/valider
+   * VALIDER une demande - AVEC NOTIFICATIONS
    */
   async valider(req, res) {
     try {
@@ -27,92 +29,24 @@ class WorkflowController {
         });
       }
 
-      // Vérifier les permissions
+      // Récupérer l'utilisateur
       const user = await User.findById(userId);
-      const userRole = user.role;
-      const userLimite = user.limiteAutorisation || 0;
 
-      // Logique de permission basée sur le statut actuel
-      let canValidate = false;
-      let newStatut = demande.statut;
-      let nextRole = null;
+      // Utiliser la logique métier existante
+      const prochainStatut = WorkflowService.getNextStatus(
+        'VALIDER',
+        demande.statut,
+        demande.montant,
+        user.role,
+        demande.clientId.notationClient || 'C',
+        demande.agenceId
+      );
 
-      switch (demande.statut) {
-        case 'EN_ETUDE_CONSEILLER':
-          // Conseiller peut valider si dans sa limite
-          if (userRole === 'conseiller' && user._id.toString() === demande.conseillerId._id.toString()) {
-            if (demande.montant <= userLimite) {
-              canValidate = true;
-              newStatut = 'APPROUVEE';
-            } else {
-              canValidate = true;
-              newStatut = 'EN_ATTENTE_RM';
-              nextRole = 'rm';
-            }
-          }
-          break;
-
-        case 'EN_ATTENTE_RM':
-          if (userRole === 'rm') {
-            if (demande.montant <= userLimite) {
-              canValidate = true;
-              newStatut = 'APPROUVEE';
-            } else {
-              canValidate = true;
-              newStatut = 'EN_ATTENTE_DCE';
-              nextRole = 'dce';
-            }
-          }
-          break;
-
-        case 'EN_ATTENTE_DCE':
-          if (userRole === 'dce') {
-            if (demande.montant <= userLimite) {
-              canValidate = true;
-              newStatut = 'APPROUVEE';
-            } else {
-              canValidate = true;
-              newStatut = 'EN_ATTENTE_ADG';
-              nextRole = 'adg';
-            }
-          }
-          break;
-
-        case 'EN_ATTENTE_ADG':
-          if (userRole === 'adg') {
-            canValidate = true;
-            newStatut = 'APPROUVEE';
-          }
-          break;
-
-        case 'EN_ANALYSE_RISQUES':
-          if (userRole === 'risques') {
-            canValidate = true;
-            newStatut = 'APPROUVEE';
-          }
-          break;
-
-        case 'APPROUVEE':
-          // Déjà approuvée
-          return res.status(400).json({
-            success: false,
-            message: 'Cette demande est déjà approuvée'
-          });
-      }
-
-      if (!canValidate) {
-        return res.status(403).json({
-          success: false,
-          message: `Vous n'avez pas la permission de valider cette demande (${demande.statut})`
-        });
-      }
-
-      // Mettre à jour la demande
+      // Logique existante
       const ancienStatut = demande.statut;
-
-      demande.statut = newStatut;
+      demande.statut = prochainStatut;
       demande.historiqueValidations.push({
-        role: userRole,
+        role: user.role,
         userId: user._id,
         nom: user.nom,
         prenom: user.prenom,
@@ -121,21 +55,32 @@ class WorkflowController {
         date: new Date()
       });
 
-      if (nextRole) {
-        demande.currentHandler = nextRole;
-      } else {
-        demande.currentHandler = null;
-      }
-
-      // Si approuvée, ajouter la date d'approbation
-      if (newStatut === 'APPROUVEE') {
+      if (prochainStatut === 'APPROUVEE') {
         demande.dateApprobation = new Date();
         demande.approuveePar = user._id;
       }
 
       await demande.save();
 
-      // Audit
+      // ========== NOTIFICATIONS AVANCÉES ==========
+      await WorkflowNotificationService.notifierValidationDemande(
+        demande,
+        user,
+        ancienStatut,
+        prochainStatut
+      );
+
+      // ========== TRACKING WORKFLOW ==========
+      await WorkflowIntegrator.logActionWithTrack(demande._id, {
+        action: 'VALIDER',
+        utilisateurId: user._id,
+        roleUtilisateur: user.role,
+        commentaire,
+        fromStatut: ancienStatut,
+        toStatut: prochainStatut
+      });
+
+      // ========== AUDIT ==========
       await AuditService.logAction({
         userId: user._id,
         userNom: `${user.prenom} ${user.nom}`,
@@ -145,25 +90,21 @@ class WorkflowController {
           demandeId: demande._id,
           numeroReference: demande.numeroReference,
           ancienStatut,
-          nouveauStatut: newStatut,
+          nouveauStatut: prochainStatut,
           montant: demande.montant
         },
         ip: req.ip
       });
 
-      // TODO: Notification
-      // await NotificationService.notifyDemandeApprouvee(demande, user);
-
-      res.json({
+      return res.json({
         success: true,
-        message: `Demande validée (${ancienStatut} → ${newStatut})`,
+        message: `Demande validée (${ancienStatut} → ${prochainStatut})`,
         data: {
           demande: {
             id: demande._id,
             numeroReference: demande.numeroReference,
             statut: demande.statut,
-            montant: demande.montant,
-            currentHandler: demande.currentHandler
+            montant: demande.montant
           },
           validateur: {
             nom: user.nom,
@@ -174,8 +115,8 @@ class WorkflowController {
       });
 
     } catch (error) {
-
-      res.status(500).json({
+      console.error('Erreur validation:', error);
+      return res.status(500).json({
         success: false,
         message: 'Erreur lors de la validation',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -184,8 +125,7 @@ class WorkflowController {
   }
 
   /**
-   * REJETER une demande
-   * Route: PATCH /api/v1/demandes/:id/rejeter
+   * REJETER une demande - AVEC NOTIFICATIONS
    */
   async rejeter(req, res) {
     try {
@@ -210,50 +150,7 @@ class WorkflowController {
 
       const user = await User.findById(userId);
 
-      // Vérifier si l'utilisateur peut rejeter
-      const statutsRejetables = [
-        'EN_ETUDE_CONSEILLER',
-        'EN_ATTENTE_RM',
-        'EN_ATTENTE_DCE',
-        'EN_ATTENTE_ADG',
-        'EN_ANALYSE_RISQUES'
-      ];
-
-      if (!statutsRejetables.includes(demande.statut)) {
-        return res.status(400).json({
-          success: false,
-          message: `Impossible de rejeter une demande avec le statut ${demande.statut}`
-        });
-      }
-
-      // Vérifier les permissions par statut
-      let canReject = false;
-
-      switch (demande.statut) {
-        case 'EN_ETUDE_CONSEILLER':
-          canReject = ['conseiller', 'admin'].includes(user.role);
-          break;
-        case 'EN_ATTENTE_RM':
-          canReject = ['rm', 'admin'].includes(user.role);
-          break;
-        case 'EN_ATTENTE_DCE':
-          canReject = ['dce', 'admin'].includes(user.role);
-          break;
-        case 'EN_ATTENTE_ADG':
-          canReject = ['adg', 'admin'].includes(user.role);
-          break;
-        case 'EN_ANALYSE_RISQUES':
-          canReject = ['risques', 'admin'].includes(user.role);
-          break;
-      }
-
-      if (!canReject) {
-        return res.status(403).json({
-          success: false,
-          message: `Vous n'avez pas la permission de rejeter cette demande`
-        });
-      }
-
+      // Logique existante
       const ancienStatut = demande.statut;
       demande.statut = 'REJETEE';
       demande.dateRejet = new Date();
@@ -272,7 +169,20 @@ class WorkflowController {
 
       await demande.save();
 
-      // Audit
+      // ========== NOTIFICATIONS AVANCÉES ==========
+      await WorkflowNotificationService.notifierRejetDemande(demande, user, motif);
+
+      // ========== TRACKING WORKFLOW ==========
+      await WorkflowIntegrator.logActionWithTrack(demande._id, {
+        action: 'REJETER',
+        utilisateurId: user._id,
+        roleUtilisateur: user.role,
+        commentaire: motif,
+        fromStatut: ancienStatut,
+        toStatut: 'REJETEE'
+      });
+
+      // ========== AUDIT ==========
       await AuditService.logAction({
         userId: user._id,
         userNom: `${user.prenom} ${user.nom}`,
@@ -288,10 +198,7 @@ class WorkflowController {
         ip: req.ip
       });
 
-      // TODO: Notification
-      // await NotificationService.notifyDemandeRejetee(demande, user);
-
-      res.json({
+      return res.json({
         success: true,
         message: 'Demande rejetée',
         data: {
@@ -310,8 +217,8 @@ class WorkflowController {
       });
 
     } catch (error) {
-
-      res.status(500).json({
+      console.error('Erreur rejet:', error);
+      return res.status(500).json({
         success: false,
         message: 'Erreur lors du rejet',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -320,8 +227,7 @@ class WorkflowController {
   }
 
   /**
-   * REMONTER une demande manuellement
-   * Route: PATCH /api/v1/demandes/:id/remonter
+   * REMONTER une demande - AVEC NOTIFICATIONS
    */
   async remonter(req, res) {
     try {
@@ -341,71 +247,49 @@ class WorkflowController {
 
       // Déterminer le prochain niveau
       let nouveauStatut;
-      let currentHandler;
-
       if (niveau) {
-        // Si niveau spécifié
         switch (niveau.toUpperCase()) {
           case 'RM':
             nouveauStatut = 'EN_ATTENTE_RM';
-            currentHandler = 'rm';
             break;
           case 'DCE':
             nouveauStatut = 'EN_ATTENTE_DCE';
-            currentHandler = 'dce';
             break;
           case 'ADG':
             nouveauStatut = 'EN_ATTENTE_ADG';
-            currentHandler = 'adg';
             break;
           case 'RISQUES':
             nouveauStatut = 'EN_ANALYSE_RISQUES';
-            currentHandler = 'risques';
             break;
           default:
             return res.status(400).json({
               success: false,
-              message: 'Niveau invalide. Valeurs acceptées: RM, DCE, ADG, RISQUES'
+              message: 'Niveau invalide'
             });
         }
       } else {
-        // Si pas de niveau, déterminer automatiquement
+        // Logique automatique
         switch (demande.statut) {
           case 'EN_ETUDE_CONSEILLER':
-            if (demande.montant <= 500000) {
-              // Dans la limite conseiller
-              return res.status(400).json({
-                success: false,
-                message: 'Cette demande peut être traitée par le conseiller. Utilisez /valider.'
-              });
-            }
             nouveauStatut = 'EN_ATTENTE_RM';
-            currentHandler = 'rm';
             break;
-
           case 'EN_ATTENTE_RM':
             nouveauStatut = 'EN_ATTENTE_DCE';
-            currentHandler = 'dce';
             break;
-
           case 'EN_ATTENTE_DCE':
             nouveauStatut = 'EN_ATTENTE_ADG';
-            currentHandler = 'adg';
             break;
-
           default:
             return res.status(400).json({
               success: false,
-              message: `Impossible de remonter depuis le statut ${demande.statut}`
+              message: `Impossible de remonter depuis ${demande.statut}`
             });
         }
       }
 
       // Mettre à jour la demande
       const ancienStatut = demande.statut;
-
       demande.statut = nouveauStatut;
-      demande.currentHandler = currentHandler;
 
       demande.historiqueValidations.push({
         role: user.role,
@@ -413,13 +297,31 @@ class WorkflowController {
         nom: user.nom,
         prenom: user.prenom,
         action: 'REMONTEE',
-        commentaire: commentaire || `Remontée à ${currentHandler.toUpperCase()}`,
+        commentaire: commentaire || `Remontée à ${nouveauStatut}`,
         date: new Date()
       });
 
       await demande.save();
 
-      // Audit
+      // ========== NOTIFICATIONS AVANCÉES ==========
+      await WorkflowNotificationService.notifierRemonteeDemande(
+        demande,
+        user,
+        niveau || nouveauStatut.split('_')[2], // Extraire le niveau du statut
+        commentaire
+      );
+
+      // ========== TRACKING WORKFLOW ==========
+      await WorkflowIntegrator.logActionWithTrack(demande._id, {
+        action: 'REMONTER',
+        utilisateurId: user._id,
+        roleUtilisateur: user.role,
+        commentaire,
+        fromStatut: ancienStatut,
+        toStatut: nouveauStatut
+      });
+
+      // ========== AUDIT ==========
       await AuditService.logAction({
         userId: user._id,
         userNom: `${user.prenom} ${user.nom}`,
@@ -429,29 +331,27 @@ class WorkflowController {
           demandeId: demande._id,
           numeroReference: demande.numeroReference,
           ancienStatut,
-          nouveauStatut,
-          currentHandler
+          nouveauStatut
         },
         ip: req.ip
       });
 
-      res.json({
+      return res.json({
         success: true,
-        message: `Demande remontée à ${currentHandler.toUpperCase()}`,
+        message: `Demande remontée`,
         data: {
           demande: {
             id: demande._id,
             numeroReference: demande.numeroReference,
             ancienStatut,
-            nouveauStatut,
-            currentHandler
+            nouveauStatut
           }
         }
       });
 
     } catch (error) {
-
-      res.status(500).json({
+      console.error('Erreur remontée:', error);
+      return res.status(500).json({
         success: false,
         message: 'Erreur lors de la remontée',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -460,21 +360,53 @@ class WorkflowController {
   }
 
   /**
-   * RETOURNER une demande pour complément
-   * Route: PATCH /api/v1/demandes/:id/retourner
+   * NOUVELLE ROUTE : Vérifier les demandes en retard
    */
-  async retourner(req, res) {
+  async verifierDemandesEnRetard(req, res) {
     try {
-      const { id } = req.params;
-      const { motifs, instructions } = req.body;
-      const userId = req.user.userId;
+      const user = await User.findById(req.user.userId);
 
-      if (!motifs || !Array.isArray(motifs) || motifs.length === 0) {
-        return res.status(400).json({
+      if (!['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
+        return res.status(403).json({
           success: false,
-          message: 'Les motifs de retour sont obligatoires (tableau)'
+          message: 'Accès non autorisé'
         });
       }
+
+      const demandesEnRetard = await WorkflowIntegrator.getDemandesEnRetard();
+
+      // Notifier pour chaque demande en retard
+      for (const track of demandesEnRetard) {
+        const demande = await DemandeForçage.findById(track.demandeId);
+        if (demande) {
+          await WorkflowNotificationService.notifierDemandeEnRetard(demande);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: `${demandesEnRetard.length} demandes en retard vérifiées`,
+        count: demandesEnRetard.length,
+        data: demandesEnRetard
+      });
+
+    } catch (error) {
+      console.error('Erreur vérification retards:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la vérification'
+      });
+    }
+  }
+
+  /**
+   * NOUVELLE ROUTE : Assigner une demande
+   */
+  async assignerDemande(req, res) {
+    try {
+      const { id } = req.params;
+      const { conseillerId } = req.body;
+      const userId = req.user.userId;
 
       const demande = await DemandeForçage.findById(id);
       if (!demande) {
@@ -485,188 +417,146 @@ class WorkflowController {
       }
 
       const user = await User.findById(userId);
+      const conseiller = await User.findById(conseillerId);
 
-      // Vérifier les permissions (seuls les validateurs peuvent retourner)
-      const statutsRetournables = [
-        'EN_ETUDE_CONSEILLER',
-        'EN_ATTENTE_RM',
-        'EN_ATTENTE_DCE',
-        'EN_ATTENTE_ADG'
-      ];
-
-      if (!statutsRetournables.includes(demande.statut)) {
+      if (!conseiller || conseiller.role !== 'conseiller') {
         return res.status(400).json({
           success: false,
-          message: `Impossible de retourner une demande avec le statut ${demande.statut}`
+          message: 'Utilisateur n\'est pas un conseiller'
         });
       }
 
-      // Déterminer où retourner
-      let nouveauStatut = 'EN_ATTENTE_CONSEILLER';
+      // Vérifier les permissions (admin, RM, ou conseiller lui-même)
+      const peutAssigner = ['admin', 'rm'].includes(user.role) ||
+        (user.role === 'conseiller' && demande.conseillerId?.toString() === user._id.toString());
 
-      // Mettre à jour la demande
-      const ancienStatut = demande.statut;
+      if (!peutAssigner) {
+        return res.status(403).json({
+          success: false,
+          message: 'Vous n\'avez pas la permission d\'assigner cette demande'
+        });
+      }
 
-      demande.statut = nouveauStatut;
-      demande.estRetournee = true;
-      demande.motifsRetour = motifs;
-      demande.instructionsRetour = instructions;
-      demande.dateRetour = new Date();
-      demande.retournePar = user._id;
+      const ancienConseiller = demande.conseillerId;
+      demande.conseillerId = conseiller._id;
 
       demande.historiqueValidations.push({
         role: user.role,
         userId: user._id,
         nom: user.nom,
         prenom: user.prenom,
-        action: 'RETOUR',
-        commentaire: `Demande retournée: ${motifs.join(', ')}`,
+        action: 'ASSIGNATION',
+        commentaire: `Demande assignée à ${conseiller.prenom} ${conseiller.nom}`,
         date: new Date()
       });
 
       await demande.save();
 
-      // Audit
-      await AuditService.logAction({
-        userId: user._id,
-        userNom: `${user.prenom} ${user.nom}`,
-        userRole: user.role,
-        action: 'RETOURNER_DEMANDE',
-        details: {
-          demandeId: demande._id,
-          numeroReference: demande.numeroReference,
-          ancienStatut,
-          nouveauStatut,
-          motifs,
-          instructions
-        },
-        ip: req.ip
+      // ========== NOTIFICATION NOUVEAU CONSEILLER ==========
+      await WorkflowNotificationService.notifierNouvelleDemandeAssignee(demande, conseiller);
+
+      // ========== TRACKING WORKFLOW ==========
+      await WorkflowIntegrator.logActionWithTrack(demande._id, {
+        action: 'ASSIGNER',
+        utilisateurId: user._id,
+        roleUtilisateur: user.role,
+        commentaire: `Assignation à ${conseiller.prenom} ${conseiller.nom}`,
+        fromStatut: demande.statut,
+        toStatut: demande.statut
       });
 
-      // TODO: Notification au client
-
-      res.json({
+      return res.json({
         success: true,
-        message: 'Demande retournée pour complément',
+        message: `Demande assignée à ${conseiller.prenom} ${conseiller.nom}`,
         data: {
           demande: {
             id: demande._id,
             numeroReference: demande.numeroReference,
-            ancienStatut,
-            nouveauStatut,
-            motifsRetour: motifs,
-            instructionsRetour: instructions
+            conseillerId: demande.conseillerId
           },
-          retourneur: {
-            nom: user.nom,
-            prenom: user.prenom,
-            role: user.role
-          }
+          ancienConseiller,
+          nouveauConseiller: conseiller
         }
       });
 
     } catch (error) {
-
-      res.status(500).json({
+      console.error('Erreur assignation:', error);
+      return res.status(500).json({
         success: false,
-        message: 'Erreur lors du retour',
+        message: 'Erreur lors de l\'assignation',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
   /**
-   * Envoyer en analyse risques
-   * Route: PATCH /api/v1/demandes/:id/analyse-risques
+   * NOUVELLE ROUTE : Obtenir le tracking workflow d'une demande
    */
-  async envoyerAnalyseRisques(req, res) {
+  async getWorkflowTrack(req, res) {
     try {
       const { id } = req.params;
-      const { commentaire } = req.body;
-      const userId = req.user.userId;
+      const track = await WorkflowIntegrator.getTrackByDemandeId(id);
 
-      const demande = await DemandeForçage.findById(id);
-      if (!demande) {
+      if (!track) {
         return res.status(404).json({
           success: false,
-          message: 'Demande non trouvée'
+          message: 'Aucun tracking trouvé pour cette demande'
         });
       }
 
-      const user = await User.findById(userId);
-
-      // Vérifier les permissions (conseiller, RM, admin)
-      if (!['conseiller', 'rm', 'admin'].includes(user.role)) {
-        return res.status(403).json({
-          success: false,
-          message: 'Seuls les conseillers et RM peuvent envoyer en analyse risques'
-        });
-      }
-
-      // Vérifier le statut actuel
-      const statutsValides = ['EN_ETUDE_CONSEILLER', 'EN_ATTENTE_RM'];
-      if (!statutsValides.includes(demande.statut)) {
-        return res.status(400).json({
-          success: false,
-          message: `Impossible d'envoyer en analyse risques depuis le statut ${demande.statut}`
-        });
-      }
-
-      // Mettre à jour la demande
-      const ancienStatut = demande.statut;
-
-      demande.statut = 'EN_ANALYSE_RISQUES';
-      demande.currentHandler = 'risques';
-
-      demande.historiqueValidations.push({
-        role: user.role,
-        userId: user._id,
-        nom: user.nom,
-        prenom: user.prenom,
-        action: 'ANALYSE_RISQUES',
-        commentaire: commentaire || 'Envoyée en analyse risques',
-        date: new Date()
-      });
-
-      await demande.save();
-
-      // Audit
-      await AuditService.logAction({
-        userId: user._id,
-        userNom: `${user.prenom} ${user.nom}`,
-        userRole: user.role,
-        action: 'ENVOYER_ANALYSE_RISQUES',
-        details: {
-          demandeId: demande._id,
-          numeroReference: demande.numeroReference,
-          ancienStatut,
-          nouveauStatut: 'EN_ANALYSE_RISQUES',
-          montant: demande.montant,
-          notationClient: demande.clientId.notationClient
-        },
-        ip: req.ip
-      });
-
-      res.json({
+      return res.json({
         success: true,
-        message: 'Demande envoyée en analyse risques',
-        data: {
-          demande: {
-            id: demande._id,
-            numeroReference: demande.numeroReference,
-            ancienStatut,
-            nouveauStatut: demande.statut,
-            currentHandler: demande.currentHandler
-          }
-        }
+        data: track
       });
 
     } catch (error) {
-
-      res.status(500).json({
+      console.error('Erreur récupération tracking:', error);
+      return res.status(500).json({
         success: false,
-        message: 'Erreur lors de l\'envoi en analyse risques',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        message: 'Erreur lors de la récupération du tracking'
+      });
+    }
+  }
+
+  /**
+   * NOUVELLE ROUTE : Obtenir les demandes en retard
+   */
+  async getDemandesEnRetard(req, res) {
+    try {
+      const demandesEnRetard = await WorkflowIntegrator.getDemandesEnRetard();
+
+      return res.json({
+        success: true,
+        count: demandesEnRetard.length,
+        data: demandesEnRetard
+      });
+
+    } catch (error) {
+      console.error('Erreur récupération demandes en retard:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des demandes en retard'
+      });
+    }
+  }
+
+  /**
+   * NOUVELLE ROUTE : Obtenir les statistiques workflow
+   */
+  async getStatsWorkflow(req, res) {
+    try {
+      const stats = await WorkflowIntegrator.getWorkflowStats();
+
+      return res.json({
+        success: true,
+        data: stats
+      });
+
+    } catch (error) {
+      console.error('Erreur récupération stats workflow:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des statistiques'
       });
     }
   }

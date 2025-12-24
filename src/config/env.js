@@ -1,5 +1,5 @@
 // config/env.js
-require('dotenv').config();  // Make sure this line is at the top
+require('dotenv').config(); 
 
 const config = {
   env: process.env.NODE_ENV || 'development',

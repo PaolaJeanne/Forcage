@@ -1,4 +1,4 @@
-// src/models/AuditLog.js - VERSION PERMISSIVE
+// src/models/AuditLog.js - VERSION CORRIGÉE
 const mongoose = require('mongoose');
 
 const auditLogSchema = new mongoose.Schema({
@@ -9,16 +9,10 @@ const auditLogSchema = new mongoose.Schema({
   action: {
     type: String,
     required: true
-    // SUPPRIMEZ L'ENUM ou ajoutez toutes les actions possibles
-    // enum: ['creation', 'modification', 'suppression', 'consultation', 
-    //        'validation', 'refus', 'soumission', 'annulation',
-    //        'traitement', 'remontee', 'regularisation']
   },
   entite: {
     type: String,
     required: true
-    // SUPPRIMEZ L'ENUM
-    // enum: ['demande', 'utilisateur', 'document', 'parametres']
   },
   entiteId: {
     type: mongoose.Schema.Types.ObjectId
@@ -33,12 +27,57 @@ const auditLogSchema = new mongoose.Schema({
     type: String
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Index
+// TOUS LES INDEX DÉFINIS ICI
 auditLogSchema.index({ utilisateur: 1, createdAt: -1 });
 auditLogSchema.index({ entite: 1, entiteId: 1 });
+auditLogSchema.index({ action: 1, createdAt: -1 });
+auditLogSchema.index({ createdAt: -1 });
+auditLogSchema.index({ entite: 1, action: 1 });
+auditLogSchema.index({ 'details.userId': 1 });
+
+// Méthodes statiques
+auditLogSchema.statics.log = async function(data) {
+  const logEntry = await this.create({
+    utilisateur: data.utilisateur,
+    action: data.action,
+    entite: data.entite,
+    entiteId: data.entiteId,
+    details: data.details || {},
+    ipAddress: data.ipAddress,
+    userAgent: data.userAgent
+  });
+  return logEntry;
+};
+
+auditLogSchema.statics.findByEntity = function(entite, entiteId) {
+  return this.find({ entite, entiteId })
+    .sort({ createdAt: -1 })
+    .populate('utilisateur', 'nom prenom email role')
+    .lean();
+};
+
+auditLogSchema.statics.findByUser = function(userId, options = {}) {
+  const { limit = 100, skip = 0, startDate, endDate } = options;
+  
+  const query = { utilisateur: userId };
+  
+  if (startDate || endDate) {
+    query.createdAt = {};
+    if (startDate) query.createdAt.$gte = new Date(startDate);
+    if (endDate) query.createdAt.$lte = new Date(endDate);
+  }
+  
+  return this.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+};
 
 const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 

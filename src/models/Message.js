@@ -1,4 +1,4 @@
-// src/models/Message.js
+// src/models/Message.js - VERSION CORRIGÉE
 const mongoose = require('mongoose');
 
 const attachmentSchema = new mongoose.Schema({
@@ -34,16 +34,16 @@ const messageSchema = new mongoose.Schema({
   conversationId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Conversation',
-    required: true,
-    index: true
+    required: true
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // Expéditeur du message
   sender: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
-    index: true
+    required: true
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // Contenu du message
@@ -60,8 +60,8 @@ const messageSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: ['text', 'file', 'system', 'notification', 'action'],
-    default: 'text',
-    index: true
+    default: 'text'
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // Pièces jointes
@@ -181,8 +181,8 @@ const messageSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['sent', 'delivered', 'read', 'failed'],
-    default: 'sent',
-    index: true
+    default: 'sent'
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // Message temporaire (comme "message en cours d'envoi")
@@ -224,15 +224,21 @@ const messageSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Index pour optimiser les requêtes
-messageSchema.index({ conversationId: 1, createdAt: -1 });
-messageSchema.index({ sender: 1, createdAt: -1 });
-messageSchema.index({ createdAt: -1 });
-messageSchema.index({ 'mentions': 1 });
-messageSchema.index({ 'reactions.userId': 1 });
-messageSchema.index({ 'metadata.systemType': 1 });
-messageSchema.index({ status: 1 });
-messageSchema.index({ 'pinned.isPinned': 1 });
+// TOUS LES INDEX DÉFINIS ICI - CENTRALISÉS
+messageSchema.index({ conversationId: 1, createdAt: -1 }); // Pour les conversations
+messageSchema.index({ sender: 1, createdAt: -1 }); // Pour les messages d'un expéditeur
+messageSchema.index({ conversationId: 1 }); // Recherche simple par conversation
+messageSchema.index({ createdAt: -1 }); // Tri global
+messageSchema.index({ type: 1 }); // Recherche par type de message
+messageSchema.index({ status: 1 }); // Recherche par statut
+messageSchema.index({ 'mentions': 1 }); // Recherche par mentions
+messageSchema.index({ 'reactions.userId': 1 }); // Recherche par réactions
+messageSchema.index({ 'metadata.systemType': 1 }); // Recherche par type système
+messageSchema.index({ 'pinned.isPinned': 1 }); // Recherche des messages épinglés
+messageSchema.index({ 'deletedBy.userId': 1 }); // Recherche par suppression
+messageSchema.index({ temporaryId: 1 }); // Recherche par ID temporaire
+messageSchema.index({ replyTo: 1 }); // Recherche par réponse
+messageSchema.index({ 'metadata.deviceInfo.ipAddress': 1 }); // Recherche par IP
 
 // Virtual pour la conversation
 messageSchema.virtual('conversation', {

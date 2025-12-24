@@ -4,7 +4,6 @@
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response.util');
 
-
 // Création d'utilisateur avec réponse optimisée
 const createUser = async (req, res) => {
   try {
@@ -59,8 +58,6 @@ const createUser = async (req, res) => {
 
     await user.save();
 
-
-
     // RÉPONSE OPTIMISÉE: Renvoyer seulement l'essentiel
     return successResponse(res, 201, 'Utilisateur créé avec succès', {
       user: {
@@ -76,7 +73,6 @@ const createUser = async (req, res) => {
     });
 
   } catch (error) {
-
     return errorResponse(res, 500, 'Erreur lors de la création');
   }
 };
@@ -112,8 +108,6 @@ const updateUserRole = async (req, res) => {
     user.updatedBy = req.userId;
     await user.save();
 
-
-
     // RÉPONSE OPTIMISÉE
     return successResponse(res, 200, 'Rôle mis à jour avec succès', {
       user: {
@@ -127,7 +121,6 @@ const updateUserRole = async (req, res) => {
     });
 
   } catch (error) {
-
     return errorResponse(res, 500, 'Erreur lors de la mise à jour');
   }
 };
@@ -174,7 +167,6 @@ const getAllUsers = async (req, res) => {
     });
 
   } catch (error) {
-
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
@@ -198,8 +190,6 @@ const toggleUserStatus = async (req, res) => {
     user.updatedBy = req.userId;
     await user.save();
 
-
-
     // RÉPONSE OPTIMISÉE
     return successResponse(res, 200, `Utilisateur ${user.isActive ? 'activé' : 'désactivé'}`, {
       user: {
@@ -211,7 +201,6 @@ const toggleUserStatus = async (req, res) => {
     });
 
   } catch (error) {
-
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
@@ -233,8 +222,28 @@ const getUserById = async (req, res) => {
     });
 
   } catch (error) {
-
     return errorResponse(res, 500, 'Erreur serveur');
+  }
+};
+
+// Suppression d'utilisateur
+const deleteUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log(`[DEBUG] Tentative suppression utilisateur: ${userId}`);
+    
+    // Logique temporaire
+    return res.status(200).json({
+      success: true,
+      message: 'Fonction deleteUser en développement',
+      userId
+    });
+  } catch (error) {
+    console.error('Erreur suppression utilisateur:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur'
+    });
   }
 };
 
@@ -243,5 +252,6 @@ module.exports = {
   updateUserRole,
   getAllUsers,
   toggleUserStatus,
-  getUserById
+  getUserById,
+  deleteUser
 };

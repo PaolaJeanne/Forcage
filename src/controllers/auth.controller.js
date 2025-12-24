@@ -121,7 +121,7 @@ const login = async (req, res) => {
     });
 
   } catch (error) {
-
+    console.error('LOGIN ERROR:', error);
     return errorResponse(res, 500, 'Erreur lors de la connexion');
   }
 };

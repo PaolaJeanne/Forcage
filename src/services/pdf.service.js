@@ -1,74 +1,152 @@
+
+// ============================================
 // src/services/pdf.service.js
+// ============================================
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
+const DemandeForçage = require('../models/DemandeForçage');
 
 class PDFService {
   
-  static async generateReportPDF(report, outputPath) {
+  /**
+   * Générer un rapport de demande
+   */
+  static async genererRapportDemande(demandeId) {
+    const demande = await DemandeForçage.findById(demandeId)
+      .populate('clientId', 'nom prenom email numeroCompte')
+      .populate('conseillerId', 'nom prenom email')
+      .populate('validePar_rm.userId', 'nom prenom')
+      .populate('validePar_dce.userId', 'nom prenom')
+      .populate('validePar_adg.userId', 'nom prenom');
+    
+    if (!demande) {
+      throw new Error('Demande non trouvée');
+    }
+    
     return new Promise((resolve, reject) => {
       try {
-        const doc = new PDFDocument({ margin: 50 });
-        const stream = fs.createWriteStream(outputPath);
+        // Créer le document PDF
+        const doc = new PDFDocument({
+          size: 'A4',
+          margins: { top: 50, bottom: 50, left: 50, right: 50 }
+        });
         
-        doc.pipe(stream);
+        // Stream vers buffer
+        const buffers = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => {
+          const pdfBuffer = Buffer.concat(buffers);
+          resolve(pdfBuffer);
+        });
+        doc.on('error', reject);
         
-        // En-tête
-        doc.fontSize(20).text('Rapport des Demandes de Forçage', { align: 'center' });
+        // ========== EN-TÊTE ==========
+        this.ajouterEnTete(doc, 'RAPPORT DE DEMANDE DE FORÇAGE');
+        
+        // ========== INFORMATIONS GÉNÉRALES ==========
         doc.moveDown();
+        doc.fontSize(14).fillColor('#1a56db').text('INFORMATIONS GÉNÉRALES', { underline: true });
+        doc.moveDown(0.5);
         
-        // Informations du rapport
-        doc.fontSize(12).text(`Titre: ${report.titre}`);
-        doc.text(`Période: ${new Date(report.periode.dateDebut).toLocaleDateString()} - ${new Date(report.periode.dateFin).toLocaleDateString()}`);
-        doc.text(`Généré le: ${new Date(report.createdAt).toLocaleDateString()}`);
+        doc.fontSize(10).fillColor('#000');
+        this.ajouterLigne(doc, 'Numéro de référence', demande.numeroReference);
+        this.ajouterLigne(doc, 'Date de création', this.formatDate(demande.dateCreation));
+        this.ajouterLigne(doc, 'Statut actuel', demande.statut);
+        this.ajouterLigne(doc, 'Priorité', demande.priorite);
+        this.ajouterLigne(doc, 'Type d\'opération', demande.typeOperation);
+        
+        // ========== CLIENT ==========
         doc.moveDown();
+        doc.fontSize(14).fillColor('#1a56db').text('INFORMATIONS CLIENT', { underline: true });
+        doc.moveDown(0.5);
         
-        // Résumé exécutif
-        doc.fontSize(14).text('Résumé Exécutif', { underline: true });
+        doc.fontSize(10).fillColor('#000');
+        this.ajouterLigne(doc, 'Nom', `${demande.clientId.prenom} ${demande.clientId.nom}`);
+        this.ajouterLigne(doc, 'Email', demande.clientId.email);
+        this.ajouterLigne(doc, 'Numéro de compte', demande.clientId.numeroCompte || 'N/A');
+        this.ajouterLigne(doc, 'Notation', demande.notationClient);
+        
+        // ========== DÉTAILS FINANCIERS ==========
         doc.moveDown();
+        doc.fontSize(14).fillColor('#1a56db').text('DÉTAILS FINANCIERS', { underline: true });
+        doc.moveDown(0.5);
         
-        if (report.donnees.kpis) {
-          doc.fontSize(12).text('Indicateurs Clés de Performance:');
-          Object.entries(report.donnees.kpis).forEach(([key, value]) => {
-            doc.text(`• ${this.formatKey(key)}: ${value}`);
-          });
-          doc.moveDown();
+        doc.fontSize(10).fillColor('#000');
+        this.ajouterLigne(doc, 'Montant demandé', this.formatMontant(demande.montant));
+        this.ajouterLigne(doc, 'Solde actuel', this.formatMontant(demande.soldeActuel));
+        this.ajouterLigne(doc, 'Découvert autorisé', this.formatMontant(demande.decouvertAutorise));
+        this.ajouterLigne(doc, 'Montant du forçage', this.formatMontant(demande.montantForçageTotal));
+        
+        if (demande.montantAutorise) {
+          this.ajouterLigne(doc, 'Montant autorisé', this.formatMontant(demande.montantAutorise));
         }
         
-        // Graphiques (si disponibles)
-        if (report.donnees.charts) {
-          // Ici vous pourriez ajouter des images de graphiques
-          // Pour l'instant, on met juste les données
-          doc.fontSize(14).text('Analyses et Tendances', { underline: true });
-          doc.moveDown();
+        this.ajouterLigne(doc, 'Date d\'échéance', this.formatDate(demande.dateEcheance));
+        
+        // ========== MOTIF ==========
+        doc.moveDown();
+        doc.fontSize(14).fillColor('#1a56db').text('MOTIF DE LA DEMANDE', { underline: true });
+        doc.moveDown(0.5);
+        
+        doc.fontSize(10).fillColor('#000');
+        doc.text(demande.motif, { align: 'justify' });
+        
+        // ========== WORKFLOW ==========
+        if (demande.historique && demande.historique.length > 0) {
+          doc.addPage();
+          doc.fontSize(14).fillColor('#1a56db').text('HISTORIQUE DU WORKFLOW', { underline: true });
+          doc.moveDown(0.5);
           
-          // ... Ajouter les analyses
+          demande.historique.forEach((etape, index) => {
+            doc.fontSize(10).fillColor('#000');
+            doc.text(`${index + 1}. ${etape.action}`, { continued: true });
+            doc.fillColor('#666').text(` - ${this.formatDate(etape.timestamp)}`);
+            
+            if (etape.commentaire) {
+              doc.fillColor('#333').text(`   "${etape.commentaire}"`, { indent: 20 });
+            }
+            
+            doc.moveDown(0.3);
+          });
         }
         
-        // Recommandations
-        doc.addPage();
-        doc.fontSize(14).text('Recommandations', { underline: true });
+        // ========== VALIDATIONS ==========
         doc.moveDown();
+        doc.fontSize(14).fillColor('#1a56db').text('VALIDATIONS', { underline: true });
+        doc.moveDown(0.5);
         
-        this.addRecommendations(doc, report.donnees);
+        doc.fontSize(10).fillColor('#000');
         
-        // Pied de page
-        const totalPages = doc.bufferedPageRange().count;
-        for (let i = 0; i < totalPages; i++) {
-          doc.switchToPage(i);
-          doc.fontSize(8)
-            .text(
-              `Page ${i + 1} sur ${totalPages}`,
-              doc.page.width - 100,
-              doc.page.height - 30,
-              { align: 'center', width: 100 }
-            );
+        if (demande.conseillerId) {
+          this.ajouterLigne(doc, 'Conseiller assigné', 
+            `${demande.conseillerId.prenom} ${demande.conseillerId.nom}`
+          );
         }
         
-        doc.end();
+        if (demande.validePar_rm?.userId) {
+          this.ajouterLigne(doc, 'Validé par RM', 
+            `${demande.validePar_rm.userId.prenom} ${demande.validePar_rm.userId.nom} - ${this.formatDate(demande.validePar_rm.date)}`
+          );
+        }
         
-        stream.on('finish', () => resolve(outputPath));
-        stream.on('error', reject);
+        if (demande.validePar_dce?.userId) {
+          this.ajouterLigne(doc, 'Validé par DCE', 
+            `${demande.validePar_dce.userId.prenom} ${demande.validePar_dce.userId.nom} - ${this.formatDate(demande.validePar_dce.date)}`
+          );
+        }
+        
+        if (demande.validePar_adg?.userId) {
+          this.ajouterLigne(doc, 'Validé par ADG', 
+            `${demande.validePar_adg.userId.prenom} ${demande.validePar_adg.userId.nom} - ${this.formatDate(demande.validePar_adg.date)}`
+          );
+        }
+        
+        // ========== PIED DE PAGE ==========
+        this.ajouterPiedDePage(doc);
+        
+        // Finaliser le PDF
+        doc.end();
         
       } catch (error) {
         reject(error);
@@ -76,55 +154,124 @@ class PDFService {
     });
   }
   
-  static formatKey(key) {
-    return key
-      .replace(/([A-Z])/g, ' $1')
-      .replace(/^./, str => str.toUpperCase());
+  /**
+   * Générer un rapport statistique
+   */
+  static async genererRapportStatistiques(filters = {}) {
+    const AnalyticsService = require('./analytics.service');
+    
+    const [overview, distribution, evolution] = await Promise.all([
+      AnalyticsService.getOverview(filters),
+      AnalyticsService.getStatutDistribution(filters),
+      AnalyticsService.getEvolutionTemporelle(filters)
+    ]);
+    
+    return new Promise((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({ size: 'A4', margins: { top: 50, bottom: 50, left: 50, right: 50 } });
+        
+        const buffers = [];
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => resolve(Buffer.concat(buffers)));
+        doc.on('error', reject);
+        
+        // EN-TÊTE
+        this.ajouterEnTete(doc, 'RAPPORT STATISTIQUES');
+        
+        // PÉRIODE
+        doc.moveDown();
+        doc.fontSize(12).fillColor('#666');
+        doc.text(`Période: ${overview.periode.debut} - ${overview.periode.fin}`);
+        
+        // KPIs
+        doc.moveDown();
+        doc.fontSize(14).fillColor('#1a56db').text('INDICATEURS CLÉS', { underline: true });
+        doc.moveDown(0.5);
+        
+        const kpis = overview.kpis;
+        
+        doc.fontSize(10).fillColor('#000');
+        this.ajouterLigne(doc, 'Total demandes', kpis.totalDemandes.toString());
+        this.ajouterLigne(doc, 'En attente', kpis.enAttente.toString());
+        this.ajouterLigne(doc, 'Approuvées', `${kpis.approuvees} (${kpis.tauxApprobation}%)`);
+        this.ajouterLigne(doc, 'Rejetées', `${kpis.rejetees} (${kpis.tauxRejet}%)`);
+        this.ajouterLigne(doc, 'Montant total', this.formatMontant(kpis.montantTotal));
+        this.ajouterLigne(doc, 'Montant moyen', this.formatMontant(kpis.montantMoyen));
+        this.ajouterLigne(doc, 'Délai moyen', `${kpis.delaiMoyenJours} jours`);
+        
+        // DISTRIBUTION PAR STATUT
+        doc.moveDown();
+        doc.fontSize(14).fillColor('#1a56db').text('DISTRIBUTION PAR STATUT', { underline: true });
+        doc.moveDown(0.5);
+        
+        distribution.forEach(item => {
+          doc.fontSize(10).fillColor('#000');
+          doc.text(`${item.label}: ${item.count} demandes (${this.formatMontant(item.montantTotal)})`);
+        });
+        
+        // PIED DE PAGE
+        this.ajouterPiedDePage(doc);
+        
+        doc.end();
+        
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
   
-  static addRecommendations(doc, data) {
-    const recommendations = [];
+  // ========== HELPERS ==========
+  
+  static ajouterEnTete(doc, titre) {
+    doc.fontSize(20).fillColor('#1a56db').text(titre, { align: 'center' });
+    doc.moveDown();
+    doc.strokeColor('#1a56db').lineWidth(2)
+       .moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(0.5);
+  }
+  
+  static ajouterLigne(doc, label, valeur) {
+    doc.fontSize(10);
+    doc.fillColor('#666').text(label + ':', { continued: true, width: 200 });
+    doc.fillColor('#000').text(valeur, { width: 300 });
+  }
+  
+  static ajouterPiedDePage(doc) {
+    const pageCount = doc.bufferedPageRange().count;
     
-    // Analyse du taux de validation
-    if (data.kpis?.tauxValidation < 60) {
-      recommendations.push({
-        title: 'Amélioration du taux de validation',
-        description: `Le taux de validation actuel (${data.kpis.tauxValidation}%) est inférieur à l\'objectif de 60%.`,
-        actions: [
-          'Former les conseillers sur les critères d\'acceptation',
-          'Revoir les processus de validation',
-          'Analyser les causes des refus'
-        ]
-      });
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      
+      doc.fontSize(8).fillColor('#999');
+      doc.text(
+        `Page ${i + 1} sur ${pageCount} - Généré le ${this.formatDate(new Date())}`,
+        50,
+        doc.page.height - 50,
+        { align: 'center' }
+      );
     }
-    
-    // Gestion du risque
-    if (data.stats?.demandesParRisque) {
-      const risqueCritique = data.stats.demandesParRisque.find(d => d._id === 'CRITIQUE');
-      if (risqueCritique && risqueCritique.count > 5) {
-        recommendations.push({
-          title: 'Attention aux risques critiques',
-          description: `${risqueCritique.count} demandes présentent un risque critique.`,
-          actions: [
-            'Renforcer les contrôles sur ces dossiers',
-            'Mettre en place un comité de risque',
-            'Revoir les politiques de crédit'
-          ]
-        });
-      }
-    }
-    
-    // Ajouter les recommandations au PDF
-    recommendations.forEach((rec, index) => {
-      doc.fontSize(12).text(`${index + 1}. ${rec.title}`, { underline: true });
-      doc.fontSize(10).text(rec.description);
-      doc.moveDown(0.5);
-      rec.actions.forEach(action => {
-        doc.fontSize(10).text(`   • ${action}`);
-      });
-      doc.moveDown();
+  }
+  
+  static formatDate(date) {
+    if (!date) return 'N/A';
+    return new Date(date).toLocaleDateString('fr-FR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
     });
+  }
+  
+  static formatMontant(montant) {
+    if (!montant) return '0 FCFA';
+    return new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency: 'XAF',
+      minimumFractionDigits: 0
+    }).format(montant);
   }
 }
 
 module.exports = PDFService;
+

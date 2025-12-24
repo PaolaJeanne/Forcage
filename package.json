@@ -6,11 +6,11 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "clean-admin": "node src/scripts/createCleanAdmin.js",
-      "clean:db": "node scripts/cleanDatabase.js",
-         "migrate": "node src/scripts/migrate-demandes.js",
+    "clean:db": "node scripts/cleanDatabase.js",
     "reset-db": "node src/scripts/reset-database.js",
-      "token:generate": "node scripts/generateToken.js"
-
+    "clean:indexes": "node src/scripts/create-cleanup-scripts.js",
+    "scheduler": "node scripts/init-scheduler.js",
+    "scheduler:test": "ENABLE_SCHEDULER=true NODE_ENV=development node scripts/init-scheduler.js"
   },
   "keywords": [
     "express",
@@ -36,14 +36,15 @@
     "helmet": "^8.1.0",
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.0.1",
+    "mongoose": "^9.0.2",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "node-cache": "^5.1.2",
     "node-cron": "^4.2.1",
     "pdfkit": "^0.17.2",
+    "pdfkit-table": "^0.1.99",
     "react-chartjs-2": "^5.3.1",
-    "socket.io": "^4.8.1",
+    "socket.io": "^4.8.2",
     "winston": "^3.19.0",
     "ws": "^8.18.3",
     "zod": "^4.1.13"

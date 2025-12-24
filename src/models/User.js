@@ -1,6 +1,4 @@
-// ============================================
-// 1. MODEL USER COMPLET - src/models/User.js
-// ============================================
+// src/models/User.js - VERSION CORRIGÉE
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
@@ -18,10 +16,9 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: [true, 'L\'email est requis'],
-    unique: true,      // Unique déjà présent
     lowercase: true,
-    trim: true,
-    index: true       // Conservez cette ligne
+    trim: true
+    // RETIRÉ: index: true - Défini plus bas
   },
 
   password: {
@@ -62,11 +59,9 @@ const userSchema = new mongoose.Schema({
   },
   numeroCompte: {
     type: String,
-    unique: true,     // Unique déjà présent
-    sparse: true,     // Sparse déjà présent
     uppercase: true,
-    trim: true,
-    index: true       // Conservez cette ligne
+    trim: true
+    // RETIRÉ: index: true - Défini plus bas
   },
   agence: {
     type: String,
@@ -135,17 +130,29 @@ const userSchema = new mongoose.Schema({
   }
 
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
 // ============================================
-// INDEXES
+// TOUS LES INDEX DÉFINIS ICI - CENTRALISÉS
 // ============================================
-//userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ role: 1, agence: 1 });
-//userSchema.index({ numeroCompte: 1 }, { unique: true, sparse: true });
-userSchema.index({ isActive: 1 });
-userSchema.index({ createdAt: -1 });
+userSchema.index({ email: 1 }, { unique: true }); // Index unique sur email
+userSchema.index({ role: 1, agence: 1 }); // Recherche par rôle et agence
+userSchema.index({ numeroCompte: 1 }, { unique: true, sparse: true }); // Index unique sparse
+userSchema.index({ isActive: 1 }); // Recherche par statut actif
+userSchema.index({ createdAt: -1 }); // Tri par date de création
+userSchema.index({ role: 1 }); // Recherche par rôle
+userSchema.index({ agence: 1 }); // Recherche par agence
+userSchema.index({ classification: 1 }); // Recherche par classification
+userSchema.index({ notationClient: 1 }); // Recherche par notation
+userSchema.index({ lastLogin: -1 }); // Tri par dernière connexion
+userSchema.index({ nom: 1, prenom: 1 }); // Recherche par nom/prénom
+userSchema.index({ 'fullName': 'text' }, {
+  weights: { nom: 3, prenom: 2, email: 1 },
+  name: 'UserSearchIndex'
+}); // Index texte pour la recherche
 
 // ============================================
 // MIDDLEWARES
@@ -244,9 +251,48 @@ userSchema.methods.toggleActive = async function () {
   return await this.save();
 };
 
+// Méthode pour vérifier les permissions
+userSchema.methods.hasPermission = function (permission) {
+  const permissions = {
+    'client': ['view_own_demandes', 'create_demande', 'chat'],
+    'conseiller': ['view_all_demandes', 'validate_demande', 'chat', 'assign_demande'],
+    'rm': ['view_all_demandes', 'validate_demande', 'chat', 'escalate_demande'],
+    'dce': ['view_all_demandes', 'validate_demande', 'manage_users'],
+    'adg': ['view_all_demandes', 'final_validation', 'manage_users', 'audit'],
+    'dga': ['all_permissions'],
+    'admin': ['all_permissions'],
+    'risques': ['view_all_demandes', 'risk_analysis', 'reject_demande']
+  };
+
+  const rolePermissions = permissions[this.role] || [];
+  return rolePermissions.includes(permission) || rolePermissions.includes('all_permissions');
+};
+
+// ============================================
+// VIRTUALS
+// ============================================
+
 // Méthode pour obtenir le nom complet
 userSchema.virtual('fullName').get(function () {
   return `${this.prenom} ${this.nom}`;
+});
+
+userSchema.virtual('initials').get(function () {
+  return `${this.prenom.charAt(0)}${this.nom.charAt(0)}`.toUpperCase();
+});
+
+userSchema.virtual('displayRole').get(function () {
+  const roleNames = {
+    'client': 'Client',
+    'conseiller': 'Conseiller',
+    'rm': 'Responsable Mission',
+    'dce': 'Directeur Centre d\'Exploitation',
+    'adg': 'Assistant Directeur Général',
+    'dga': 'Directeur Général Adjoint',
+    'admin': 'Administrateur',
+    'risques': 'Gestionnaire Risques'
+  };
+  return roleNames[this.role] || this.role;
 });
 
 // ============================================
@@ -268,6 +314,31 @@ userSchema.statics.emailExists = async function (email) {
 userSchema.statics.accountNumberExists = async function (numeroCompte) {
   const user = await this.findOne({ numeroCompte: numeroCompte.toUpperCase() });
   return !!user;
+};
+
+// Rechercher des utilisateurs par texte
+userSchema.statics.search = function (searchTerm, filters = {}) {
+  let query = {};
+
+  if (searchTerm) {
+    query.$text = { $search: searchTerm };
+  }
+
+  if (filters.role) query.role = filters.role;
+  if (filters.agence) query.agence = filters.agence;
+  if (filters.isActive !== undefined) query.isActive = filters.isActive;
+
+  return this.find(query)
+    .sort({ createdAt: -1 })
+    .select('-password -otpSecret -__v');
+};
+
+// Compter les utilisateurs par rôle
+userSchema.statics.countByRole = function () {
+  return this.aggregate([
+    { $group: { _id: '$role', count: { $sum: 1 } } },
+    { $sort: { count: -1 } }
+  ]);
 };
 
 // ============================================

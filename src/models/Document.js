@@ -1,3 +1,4 @@
+// src/models/Document.js - VERSION CORRIGÉE
 const mongoose = require('mongoose');
 
 const documentSchema = new mongoose.Schema({
@@ -42,8 +43,50 @@ const documentSchema = new mongoose.Schema({
     default: 'en_attente'
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
+
+// TOUS LES INDEX DÉFINIS ICI
+documentSchema.index({ demande: 1 });
+documentSchema.index({ uploadePar: 1 });
+documentSchema.index({ typeDocument: 1 });
+documentSchema.index({ statut: 1 });
+documentSchema.index({ createdAt: -1 });
+documentSchema.index({ demande: 1, typeDocument: 1 });
+documentSchema.index({ demande: 1, statut: 1 });
+
+// Méthodes d'instance
+documentSchema.methods.marquerValide = async function() {
+  this.statut = 'valide';
+  await this.save();
+  return this;
+};
+
+documentSchema.methods.marquerRejete = async function() {
+  this.statut = 'rejete';
+  await this.save();
+  return this;
+};
+
+// Méthodes statiques
+documentSchema.statics.findByDemande = function(demandeId, filters = {}) {
+  const query = { demande: demandeId };
+  
+  if (filters.typeDocument) query.typeDocument = filters.typeDocument;
+  if (filters.statut) query.statut = filters.statut;
+  
+  return this.find(query)
+    .sort({ createdAt: -1 })
+    .populate('uploadePar', 'nom prenom email');
+};
+
+documentSchema.statics.findByUploader = function(uploaderId) {
+  return this.find({ uploadePar: uploaderId })
+    .sort({ createdAt: -1 })
+    .populate('demande', 'numeroReference statut');
+};
 
 const Document = mongoose.model('Document', documentSchema);
 

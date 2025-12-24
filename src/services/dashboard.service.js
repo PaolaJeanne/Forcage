@@ -1,67 +1,126 @@
-// src/services/dashboard.service.js - VERSION CORRIGÉE
+// ============================================
+// src/services/dashboard.service.js - VERSION COMPLÈTE UNIFIÉE
+// ============================================
 const DemandeForçage = require('../models/DemandeForçage');
+const User = require('../models/User');
+const { STATUTS_DEMANDE } = require('../constants/roles');
+const mongoose = require('mongoose');
 
 class DashboardService {
 
+  // ==================== KPIs & OVERVIEW ====================
+
   static async getFilteredKPIs(query, role) {
     try {
-
-
       const kpis = {
         demandesTotal: 0,
         demandesEnCours: 0,
+        demandesApprouvees: 0,
+        demandesRejetees: 0,
         tauxValidation: 0,
         montantTotal: 0,
-        clientsActifs: 0,
+        montantApprouve: 0,
         montantMoyen: 0,
+        clientsActifs: 0,
         tempsTraitementMoyen: 0
       };
 
-      // Compter selon les filtres
-      const [total, enCours, validees] = await Promise.all([
+      const statutsEnCours = [
+        STATUTS_DEMANDE.EN_ATTENTE_CONSEILLER,
+        STATUTS_DEMANDE.EN_ETUDE_CONSEILLER,
+        STATUTS_DEMANDE.EN_ATTENTE_RM,
+        STATUTS_DEMANDE.EN_ATTENTE_DCE,
+        STATUTS_DEMANDE.EN_ATTENTE_ADG,
+        STATUTS_DEMANDE.EN_ANALYSE_RISQUES
+      ];
+
+      // Compter les demandes
+      const [total, enCours, approuvees, rejetees] = await Promise.all([
         DemandeForçage.countDocuments(query),
-        DemandeForçage.countDocuments({ ...query, statut: { $in: ['SOUMISE', 'EN_COURS'] } }),
-        DemandeForçage.countDocuments({ ...query, statut: 'VALIDEE' })
+        DemandeForçage.countDocuments({ ...query, statut: { $in: statutsEnCours } }),
+        DemandeForçage.countDocuments({ ...query, statut: STATUTS_DEMANDE.APPROUVEE }),
+        DemandeForçage.countDocuments({ ...query, statut: STATUTS_DEMANDE.REJETEE })
       ]);
 
       kpis.demandesTotal = total;
       kpis.demandesEnCours = enCours;
-      kpis.tauxValidation = total > 0 ? Math.round((validees / total) * 100) : 0;
+      kpis.demandesApprouvees = approuvees;
+      kpis.demandesRejetees = rejetees;
+      kpis.tauxValidation = total > 0 ? Math.round((approuvees / total) * 100) : 0;
 
-      // Agréger le montant total
-      const montantAgg = await DemandeForçage.aggregate([
-        { $match: query },
-        { $group: { _id: null, total: { $sum: '$montant' } } }
+      // Montants
+      const [montantTotal, montantApprouve] = await Promise.all([
+        DemandeForçage.aggregate([
+          { $match: query },
+          { $group: { _id: null, total: { $sum: '$montant' } } }
+        ]),
+        DemandeForçage.aggregate([
+          { $match: { ...query, statut: STATUTS_DEMANDE.APPROUVEE } },
+          { $group: { _id: null, total: { $sum: '$montantAutorise' } } }
+        ])
       ]);
 
-      kpis.montantTotal = montantAgg[0]?.total || 0;
+      kpis.montantTotal = montantTotal[0]?.total || 0;
+      kpis.montantApprouve = montantApprouve[0]?.total || 0;
       kpis.montantMoyen = total > 0 ? Math.round(kpis.montantTotal / total) : 0;
 
-      // Clients actifs (distincts)
-      const clientsActifs = await DemandeForçage.distinct('client', query);
+      // Clients actifs
+      const clientsActifs = await DemandeForçage.distinct('clientId', query);
       kpis.clientsActifs = clientsActifs.length;
 
+      // Temps de traitement moyen
+      const tempsTraitement = await DemandeForçage.aggregate([
+        {
+          $match: {
+            ...query,
+            statut: { $in: [STATUTS_DEMANDE.APPROUVEE, STATUTS_DEMANDE.REJETEE] },
+            dateValidation: { $exists: true }
+          }
+        },
+        {
+          $project: {
+            dureeHeures: {
+              $divide: [
+                { $subtract: ['$dateValidation', '$dateSoumission'] },
+                1000 * 60 * 60
+              ]
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            moyenne: { $avg: '$dureeHeures' }
+          }
+        }
+      ]);
+
+      kpis.tempsTraitementMoyen = tempsTraitement[0]?.moyenne
+        ? Math.round(tempsTraitement[0].moyenne * 10) / 10
+        : 0;
+
       return kpis;
-
     } catch (error) {
-
       throw error;
     }
   }
 
+  // ==================== STATISTIQUES ====================
+
   static async getFilteredStats(user, filters = {}) {
     try {
-      let query = this.buildQueryForRole(user, filters);
+      const query = this.buildQueryForRole(user, filters);
 
       const stats = {
         demandesParStatut: [],
         demandesParRisque: [],
+        demandesParMontant: [],
         evolutionMensuelle: [],
         topConseillers: [],
         topClients: []
       };
 
-      // Statistiques par statut
+      // Par statut
       stats.demandesParStatut = await DemandeForçage.aggregate([
         { $match: query },
         {
@@ -75,7 +134,7 @@ class DashboardService {
         { $sort: { count: -1 } }
       ]);
 
-      // Statistiques par score de risque (si accessible)
+      // Par score de risque
       if (['admin', 'dga', 'risques', 'rm', 'dce', 'adg'].includes(user.role)) {
         stats.demandesParRisque = await DemandeForçage.aggregate([
           { $match: query },
@@ -90,7 +149,10 @@ class DashboardService {
         ]);
       }
 
-      // Évolution mensuelle
+      // Par tranches de montant
+      stats.demandesParMontant = await this.getDistributionMontants(query);
+
+      // Évolution mensuelle (12 derniers mois)
       stats.evolutionMensuelle = await DemandeForçage.aggregate([
         { $match: query },
         {
@@ -100,172 +162,198 @@ class DashboardService {
               month: { $month: '$createdAt' }
             },
             count: { $sum: 1 },
-            montantTotal: { $sum: '$montant' }
+            montantTotal: { $sum: '$montant' },
+            approuvees: {
+              $sum: { $cond: [{ $eq: ['$statut', STATUTS_DEMANDE.APPROUVEE] }, 1, 0] }
+            }
           }
         },
-        { $sort: { '_id.year': 1, '_id.month': 1 } },
+        { $sort: { '_id.year': -1, '_id.month': -1 } },
         { $limit: 12 }
       ]);
 
-      // Top conseillers (si accessible)
+      // Top conseillers
       if (['admin', 'dga', 'risques', 'rm', 'dce', 'adg'].includes(user.role)) {
         stats.topConseillers = await DemandeForçage.aggregate([
-          { $match: query },
+          { $match: { ...query, conseillerId: { $exists: true } } },
           {
             $group: {
-              _id: '$conseiller',
+              _id: '$conseillerId',
               count: { $sum: 1 },
               montantTotal: { $sum: '$montant' },
-              tauxValidation: {
-                $avg: {
-                  $cond: [{ $eq: ['$statut', 'VALIDEE'] }, 1, 0]
-                }
+              approuvees: {
+                $sum: { $cond: [{ $eq: ['$statut', STATUTS_DEMANDE.APPROUVEE] }, 1, 0] }
+              }
+            }
+          },
+          {
+            $addFields: {
+              tauxApprobation: {
+                $multiply: [{ $divide: ['$approuvees', '$count'] }, 100]
               }
             }
           },
           { $sort: { count: -1 } },
-          { $limit: 5 }
+          { $limit: 5 },
+          {
+            $lookup: {
+              from: 'users',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'conseiller'
+            }
+          },
+          { $unwind: { path: '$conseiller', preserveNullAndEmptyArrays: true } }
+        ]);
+      }
+
+      // Top clients
+      if (user.role !== 'client') {
+        stats.topClients = await DemandeForçage.aggregate([
+          { $match: { ...query, clientId: { $exists: true } } },
+          {
+            $group: {
+              _id: '$clientId',
+              count: { $sum: 1 },
+              montantTotal: { $sum: '$montant' }
+            }
+          },
+          { $sort: { montantTotal: -1 } },
+          { $limit: 5 },
+          {
+            $lookup: {
+              from: 'users',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'client'
+            }
+          },
+          { $unwind: { path: '$client', preserveNullAndEmptyArrays: true } }
         ]);
       }
 
       return stats;
-
     } catch (error) {
-
       throw error;
     }
   }
 
-  // Statistiques de base (pour tous les rôles)
-  static async getBasicStats(query, role) {
-    const stats = {
-      demandesParStatut: [],
-      demandesParType: []
-    };
+  // ==================== DISTRIBUTION MONTANTS ====================
 
-    // Par statut
-    stats.demandesParStatut = await DemandeForçage.aggregate([
-      { $match: query },
-      {
-        $group: {
-          _id: '$statut',
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { count: -1 } }
-    ]);
+  static async getDistributionMontants(query) {
+    const demandes = await DemandeForçage.find(query).select('montant statut');
 
-    // Par type
-    stats.demandesParType = await DemandeForçage.aggregate([
-      { $match: query },
-      {
-        $group: {
-          _id: '$typeOperation',
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { count: -1 } }
-    ]);
+    const tranches = [
+      { min: 0, max: 1000000, label: '< 1M FCFA' },
+      { min: 1000000, max: 5000000, label: '1M - 5M FCFA' },
+      { min: 5000000, max: 20000000, label: '5M - 20M FCFA' },
+      { min: 20000000, max: 50000000, label: '20M - 50M FCFA' },
+      { min: 50000000, max: Infinity, label: '> 50M FCFA' }
+    ];
 
-    return stats;
-  }
+    return tranches.map(tranche => {
+      const demandesTranche = demandes.filter(d =>
+        d.montant >= tranche.min && d.montant < tranche.max
+      );
 
-  // Statistiques avancées (RM et +)
-  static async getAdvancedStats(query, role) {
-    const stats = await this.getBasicStats(query, role);
-
-    // Ajouter des métriques avancées
-
-    // Temps moyen de traitement
-    const tempsTraitement = await DemandeForçage.aggregate([
-      { $match: { ...query, dateTraitement: { $exists: true } } },
-      {
-        $project: {
-          duree: {
-            $subtract: ['$dateTraitement', '$createdAt']
-          }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          moyenneMs: { $avg: '$duree' }
-        }
-      }
-    ]);
-
-    stats.tempsTraitementMoyen = tempsTraitement[0]
-      ? Math.round(tempsTraitement[0].moyenneMs / (1000 * 60 * 60)) // Convertir en heures
-      : 0;
-
-    return stats;
-  }
-
-  // Statistiques de risque (Risques, ADG, DGA, Admin)
-  static async getRiskStats(query, role) {
-    const stats = {
-      parScoreRisque: [],
-      demandesRisqueEleve: 0,
-      montantTotalRisque: 0,
-      alertes: []
-    };
-
-    // Par score de risque
-    stats.parScoreRisque = await DemandeForçage.aggregate([
-      { $match: query },
-      {
-        $group: {
-          _id: '$scoreRisque',
-          count: { $sum: 1 },
-          montantTotal: { $sum: '$montant' },
-          montantMoyen: { $avg: '$montant' }
-        }
-      },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Demandes à risque élevé ou critique
-    const risqueEleve = await DemandeForçage.countDocuments({
-      ...query,
-      scoreRisque: { $in: ['ELEVE', 'CRITIQUE'] },
-      statut: { $in: ['ENVOYEE', 'EN_ETUDE', 'EN_VALIDATION'] }
+      return {
+        tranche: tranche.label,
+        count: demandesTranche.length,
+        approuvees: demandesTranche.filter(d => d.statut === STATUTS_DEMANDE.APPROUVEE).length,
+        montantTotal: demandesTranche.reduce((sum, d) => sum + d.montant, 0)
+      };
     });
+  }
 
-    stats.demandesRisqueEleve = risqueEleve;
+  // ==================== ALERTES ====================
 
-    // Montant total des demandes à risque
-    const montantRisque = await DemandeForçage.aggregate([
-      {
-        $match: {
-          ...query,
-          scoreRisque: { $in: ['ELEVE', 'CRITIQUE'] }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: '$montant' }
-        }
-      }
-    ]);
-
-    stats.montantTotalRisque = montantRisque[0]?.total || 0;
-
-    // Alertes (demandes en retard)
-    stats.alertes = await DemandeForçage.find({
-      ...query,
-      statut: 'VALIDEE',
-      regularisee: false,
-      dateEcheance: { $lt: new Date() }
-    })
-      .limit(10)
+  static async getAlertes(query, role) {
+    const demandes = await DemandeForçage.find(query)
       .populate('clientId', 'nom prenom email')
+      .populate('conseillerId', 'nom prenom')
       .lean();
 
-    return stats;
+    const alertes = [];
+
+    demandes.forEach(demande => {
+      // Retard de traitement
+      if (demande.enRetard) {
+        alertes.push({
+          type: 'retard',
+          severity: 'high',
+          demandeId: demande._id,
+          numeroReference: demande.numeroReference,
+          message: 'Demande en retard de traitement',
+          statut: demande.statut
+        });
+      }
+
+      // Montant élevé non traité
+      if (demande.montant >= 10000000 &&
+        ![STATUTS_DEMANDE.APPROUVEE, STATUTS_DEMANDE.REJETEE].includes(demande.statut)) {
+        alertes.push({
+          type: 'montant_eleve',
+          severity: 'medium',
+          demandeId: demande._id,
+          numeroReference: demande.numeroReference,
+          message: `Montant élevé (${(demande.montant / 1000000).toFixed(1)}M) en attente`,
+          montant: demande.montant
+        });
+      }
+
+      // Échéance proche
+      const joursRestants = Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24));
+      if (joursRestants <= 3 && joursRestants > 0 && demande.statut !== STATUTS_DEMANDE.APPROUVEE) {
+        alertes.push({
+          type: 'echeance_proche',
+          severity: 'medium',
+          demandeId: demande._id,
+          numeroReference: demande.numeroReference,
+          message: `Échéance dans ${joursRestants} jour(s)`,
+          dateEcheance: demande.dateEcheance
+        });
+      }
+    });
+
+    return alertes.sort((a, b) => {
+      const severityOrder = { high: 0, medium: 1, low: 2 };
+      return severityOrder[a.severity] - severityOrder[b.severity];
+    });
   }
 
-  // Statistiques globales (Admin, DGA)
+  // ==================== ACTIVITÉS RÉCENTES ====================
+
+  static async getRecentActivities(query, role, limit = 10) {
+    const demandes = await DemandeForçage.find(query)
+      .sort({ updatedAt: -1 })
+      .limit(limit)
+      .populate('clientId', 'nom prenom email')
+      .populate('conseillerId', 'nom prenom')
+      .lean();
+
+    return demandes.map(d => ({
+      id: d._id,
+      numeroReference: d.numeroReference,
+      statut: d.statut,
+      typeOperation: d.typeOperation,
+      montant: d.montant,
+      client: d.clientId ? {
+        nom: d.clientId.nom,
+        prenom: d.clientId.prenom,
+        email: role !== 'client' ? d.clientId.email : undefined
+      } : null,
+      conseiller: d.conseillerId ? {
+        nom: d.conseillerId.nom,
+        prenom: d.conseillerId.prenom
+      } : null,
+      scoreRisque: ['rm', 'dce', 'adg', 'dga', 'admin', 'risques'].includes(role) ? d.scoreRisque : undefined,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt
+    }));
+  }
+
+  // ==================== STATISTIQUES GLOBALES ====================
+
   static async getGlobalStats() {
     const stats = {
       totalDemandes: 0,
@@ -297,17 +385,15 @@ class DashboardService {
           _id: '$agenceId',
           total: { $sum: 1 },
           montantTotal: { $sum: '$montant' },
-          validees: {
-            $sum: {
-              $cond: [{ $eq: ['$statut', 'VALIDEE'] }, 1, 0]
-            }
+          approuvees: {
+            $sum: { $cond: [{ $eq: ['$statut', STATUTS_DEMANDE.APPROUVEE] }, 1, 0] }
           }
         }
       },
       {
         $addFields: {
           tauxValidation: {
-            $multiply: [{ $divide: ['$validees', '$total'] }, 100]
+            $multiply: [{ $divide: ['$approuvees', '$total'] }, 100]
           }
         }
       },
@@ -318,71 +404,56 @@ class DashboardService {
     return stats;
   }
 
-  // Activités récentes avec limite
-  static async getRecentActivities(query, role, limit = 10) {
-    const demandes = await DemandeForçage.find(query)
-      .sort({ updatedAt: -1 })
-      .limit(limit)
-      .populate('clientId', 'nom prenom email')
-      .populate('conseillerId', 'nom prenom')
-      .lean();
+  // ==================== BUILD QUERY ====================
 
-    return demandes.map(d => ({
-      id: d._id,
-      numeroReference: d.numeroReference,
-      statut: d.statut,
-      typeOperation: d.typeOperation,
-      montant: d.montant,
-      client: d.clientId ? {
-        nom: d.clientId.nom,
-        prenom: d.clientId.prenom,
-        email: role !== 'client' ? d.clientId.email : undefined
-      } : null,
-      conseiller: d.conseillerId ? {
-        nom: d.conseillerId.nom,
-        prenom: d.conseillerId.prenom
-      } : null,
-      scoreRisque: ['rm', 'dce', 'adg', 'dga', 'admin', 'risques'].includes(role) ? d.scoreRisque : undefined,
-      createdAt: d.createdAt,
-      updatedAt: d.updatedAt
-    }));
-  }
-
-  // Helper pour construire la query selon le rôle
   static buildQueryForRole(user, filters = {}) {
     let query = {};
+
+    const safelyObjectId = (id) => {
+      try {
+        return typeof id === 'string' ? new mongoose.Types.ObjectId(id) : id;
+      } catch (e) {
+        return id;
+      }
+    };
+
+    const userId = safelyObjectId(user._id || user.id);
 
     // Base selon le rôle
     switch (user.role) {
       case 'admin':
       case 'dga':
       case 'risques':
-        // Toutes les données
+        // Accès total
         break;
 
       case 'client':
-        query.client = user._id || user.id;
+        query.clientId = userId;
         break;
 
       case 'conseiller':
         query.$or = [
-          { conseiller: user._id || user.id },
-          { agence: user.agence }
+          { conseillerId: userId },
+          { agenceId: user.agence || user.agenceId }
         ];
         break;
 
       case 'rm':
       case 'dce':
       case 'adg':
-        query.agence = user.agence;
+        if (user.agence || user.agenceId) {
+          query.agenceId = user.agence || user.agenceId;
+        }
         break;
 
       default:
-        query.client = user._id || user.id;
+        query.clientId = userId;
     }
 
     // Appliquer les filtres additionnels
-    if (filters.statut) query.statut = filters.statut;
+    if (filters.statut) {
+      query.statut = Array.isArray(filters.statut) ? { $in: filters.statut } : filters.statut;
+    }
     if (filters.typeOperation) query.typeOperation = filters.typeOperation;
     if (filters.scoreRisque) query.scoreRisque = { $gte: filters.scoreRisque };
     if (filters.dateDebut || filters.dateFin) {
@@ -390,25 +461,27 @@ class DashboardService {
       if (filters.dateDebut) query.createdAt.$gte = new Date(filters.dateDebut);
       if (filters.dateFin) query.createdAt.$lte = new Date(filters.dateFin);
     }
+    if (filters.agenceId) query.agenceId = filters.agenceId;
+    if (filters.conseillerId) query.conseillerId = safelyObjectId(filters.conseillerId);
+    if (filters.clientId) query.clientId = safelyObjectId(filters.clientId);
 
     return query;
   }
 
-  // Ajoutez cette méthode
+  // ==================== DASHBOARD COMPLET ====================
+
   static async getDashboardData(user, filters = {}) {
     try {
-
-
       const query = this.buildQueryForRole(user, filters);
 
       // Récupérer toutes les données en parallèle
-      const [kpis, stats, recentActivities] = await Promise.all([
+      const [kpis, stats, recentActivities, alertes] = await Promise.all([
         this.getFilteredKPIs(query, user.role),
         this.getFilteredStats(user, filters),
-        this.getRecentActivities(query, user.role, 5)
+        this.getRecentActivities(query, user.role, 5),
+        this.getAlertes(query, user.role)
       ]);
 
-      // Construire la réponse complète
       const dashboardData = {
         user: {
           id: user._id || user.id,
@@ -421,6 +494,7 @@ class DashboardService {
         kpis,
         stats,
         recentActivities,
+        alertes: alertes.slice(0, 5), // Top 5 alertes
         filters: {
           applied: filters,
           available: this.getAvailableFilters(user.role)
@@ -429,28 +503,20 @@ class DashboardService {
         accessLevel: this.getAccessLevel(user.role)
       };
 
-      // Ajouter des données supplémentaires selon le rôle
+      // Données additionnelles selon le rôle
       if (['admin', 'dga', 'risques'].includes(user.role)) {
         const globalStats = await this.getGlobalStats();
         dashboardData.globalStats = globalStats;
       }
 
-      if (['admin', 'dga', 'risques', 'rm', 'dce', 'adg'].includes(user.role)) {
-        const riskStats = await this.getRiskStats(query, user.role);
-        dashboardData.riskStats = riskStats;
-      }
-
       return dashboardData;
-
     } catch (error) {
-
       throw error;
     }
   }
 
-  // ... autres méthodes existantes
+  // ==================== HELPERS ====================
 
-  // Ajoutez ces méthodes helpers
   static getAvailableFilters(role) {
     const filters = [
       {
@@ -468,13 +534,7 @@ class DashboardService {
         key: 'statut',
         label: 'Statut',
         type: 'multi-select',
-        options: [
-          { value: 'BROUILLON', label: 'Brouillon' },
-          { value: 'SOUMISE', label: 'Soumise' },
-          { value: 'EN_COURS', label: 'En cours' },
-          { value: 'VALIDEE', label: 'Validée' },
-          { value: 'REFUSEE', label: 'Refusée' }
-        ]
+        options: Object.values(STATUTS_DEMANDE).map(s => ({ value: s, label: s }))
       }
     ];
 
@@ -486,9 +546,7 @@ class DashboardService {
     }
 
     if (role !== 'client') {
-      filters.push(
-        { key: 'clientId', label: 'Client', type: 'select', dynamic: true }
-      );
+      filters.push({ key: 'clientId', label: 'Client', type: 'select', dynamic: true });
     }
 
     return filters;

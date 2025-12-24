@@ -1,169 +1,77 @@
-// src/scripts/migrate-demandes.js
-const mongoose = require('mongoose');
+// scripts/fix-chatarchive.js
 require('dotenv').config();
+const mongoose = require('mongoose');
 
-async function migrateDemandes() {
+async function fixChatArchiveIndexes() {
   try {
-    console.log('🚀 Migration des demandes...');
+    const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017/force-management';
     
-    // Connexion
-    await mongoose.connect(process.env.MONGODB_URI, {
-      dbName: process.env.DB_NAME || 'forcing_db'
-    });
-    
+    console.log('🔗 Connexion à MongoDB...');
+    await mongoose.connect(MONGO_URI);
     console.log('✅ Connecté à MongoDB');
     
-    const DemandeForçage = require('../models/DemandeForçage');
-    const User = require('../models/User');
+    // Vider le cache du modèle pour le recharger proprement
+    delete mongoose.models.ChatArchive;
+    delete mongoose.modelSchemas.ChatArchive;
     
-    // 1. Compter les demandes existantes
-    const totalDemandes = await DemandeForçage.countDocuments();
-    console.log(`📊 Total demandes: ${totalDemandes}`);
+    // Recharger le modèle corrigé
+    const ChatArchive = require('../src/models/ChatArchive');
     
-    // 2. Vérifier la structure des pièces justificatives existantes
-    const demandesAvecPieces = await DemandeForçage.find({
-      piecesJustificatives: { $exists: true, $ne: [] }
+    console.log('\n📊 Vérification des index actuels...');
+    const currentIndexes = await ChatArchive.collection.getIndexes();
+    
+    console.log(`Nombre d'index actuels: ${Object.keys(currentIndexes).length}`);
+    Object.keys(currentIndexes).forEach(index => {
+      console.log(`  • ${index}`);
     });
     
-    console.log(`📎 Demandes avec pièces justificatives: ${demandesAvecPieces.length}`);
+    // Vérifier s'il y a des index dupliqués pour expiresAt
+    const expiresAtIndexes = Object.keys(currentIndexes).filter(name => 
+      name.includes('expiresAt')
+    );
     
-    for (const demande of demandesAvecPieces) {
-      try {
-        const pieces = demande.piecesJustificatives;
-        
-        // Si pieces est une chaîne JSON, la parser
-        if (typeof pieces === 'string') {
-          try {
-            const parsed = JSON.parse(pieces);
-            demande.piecesJustificatives = Array.isArray(parsed) ? parsed : [parsed];
-            await demande.save();
-            console.log(`✅ Demande ${demande.numeroReference} corrigée (string → array)`);
-          } catch (parseError) {
-            // Si échec du parsing, créer un objet simple
-            demande.piecesJustificatives = [{
-              nom: 'Document joint',
-              url: pieces,
-              type: 'application/octet-stream',
-              taille: 0,
-              uploadedAt: new Date()
-            }];
-            await demande.save();
-            console.log(`✅ Demande ${demande.numeroReference} corrigée (string → object)`);
-          }
+    if (expiresAtIndexes.length > 1) {
+      console.log(`\n⚠️  ${expiresAtIndexes.length} index expiresAt détectés!`);
+      
+      // Garder seulement l'index avec TTL
+      for (const indexName of expiresAtIndexes) {
+        if (indexName !== 'expiresAt_1') {
+          console.log(`🗑️  Suppression de l'index dupliqué: ${indexName}`);
+          await ChatArchive.collection.dropIndex(indexName);
         }
-        // Si pieces est un tableau de chaînes, convertir en objets
-        else if (Array.isArray(pieces) && pieces.length > 0 && typeof pieces[0] === 'string') {
-          const nouvellesPieces = pieces.map((piece, index) => ({
-            nom: `Document ${index + 1}`,
-            url: piece,
-            type: 'application/octet-stream',
-            taille: 0,
-            uploadedAt: new Date()
-          }));
-          
-          demande.piecesJustificatives = nouvellesPieces;
-          await demande.save();
-          console.log(`✅ Demande ${demande.numeroReference} corrigée (array strings → array objects)`);
-        }
-      } catch (error) {
-        console.error(`❌ Erreur migration demande ${demande.numeroReference}:`, error.message);
       }
     }
     
-    // 3. Créer des demandes de test si aucune n'existe
-    if (totalDemandes === 0) {
-      console.log('📝 Création de demandes de test...');
-      
-      // Trouver un client et un conseiller
-      const client = await User.findOne({ role: 'client' });
-      const conseiller = await User.findOne({ role: 'conseiller' });
-      
-      if (!client || !conseiller) {
-        console.log('⚠️ Créer d\'abord des utilisateurs de test');
-        return;
-      }
-      
-      // Créer 5 demandes de test
-      const testDemandes = [
-        {
-          numeroReference: 'DF2024120001',
-          motif: 'Paiement fournisseur urgent - Matériel de bureau',
-          montant: 450000,
-          clientId: client._id,
-          conseillerId: conseiller._id,
-          agenceId: 'Agence Centrale',
-          piecesJustificatives: [{
-            nom: 'facture_materiel.pdf',
-            url: '/uploads/facture.pdf',
-            type: 'application/pdf',
-            taille: 1024000,
-            uploadedAt: new Date()
-          }],
-          dateEcheance: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-          statut: 'EN_ATTENTE_CONSEILLER',
-          priorite: 'URGENTE',
-          scoreRisque: 'MOYEN'
-        },
-        {
-          numeroReference: 'DF2024120002',
-          motif: 'Rénovation locaux commerciaux',
-          montant: 3500000,
-          clientId: client._id,
-          conseillerId: conseiller._id,
-          agenceId: 'Agence Centrale',
-          piecesJustificatives: [{
-            nom: 'devis_renovation.pdf',
-            url: '/uploads/devis.pdf',
-            type: 'application/pdf',
-            taille: 2048000,
-            uploadedAt: new Date()
-          }],
-          dateEcheance: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-          statut: 'EN_ATTENTE_RM',
-          priorite: 'HAUTE',
-          scoreRisque: 'ELEVE'
-        },
-        {
-          numeroReference: 'DF2024120003',
-          motif: 'Achat véhicule de service',
-          montant: 8000000,
-          clientId: client._id,
-          conseillerId: conseiller._id,
-          agenceId: 'Agence Centrale',
-          piecesJustificatives: [{
-            nom: 'contrat_vehicule.pdf',
-            url: '/uploads/contrat.pdf',
-            type: 'application/pdf',
-            taille: 3072000,
-            uploadedAt: new Date()
-          }],
-          dateEcheance: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          statut: 'APPROUVEE',
-          priorite: 'NORMALE',
-          scoreRisque: 'FAIBLE'
-        }
-      ];
-      
-      for (const demandeData of testDemandes) {
-        const demande = new DemandeForçage(demandeData);
-        await demande.save();
-        console.log(`✅ Demande test créée: ${demandeData.numeroReference}`);
-      }
-    }
+    console.log('\n🔄 Synchronisation des index avec le schéma corrigé...');
+    await ChatArchive.syncIndexes();
     
-    console.log('🎉 Migration terminée avec succès');
+    console.log('\n✅ Vérification des nouveaux index...');
+    const newIndexes = await ChatArchive.collection.getIndexes();
+    console.log(`Nombre d'index après synchronisation: ${Object.keys(newIndexes).length}`);
+    Object.keys(newIndexes).forEach(index => {
+      const indexInfo = newIndexes[index];
+      const ttl = indexInfo.expireAfterSeconds ? ` (TTL: ${indexInfo.expireAfterSeconds}s)` : '';
+      console.log(`  • ${index}${ttl}`);
+    });
+    
+    console.log('\n🎉 ChatArchive corrigé avec succès!');
     
   } catch (error) {
-    console.error('❌ Erreur migration:', error);
+    console.error('❌ Erreur:', error.message);
+    if (error.code === 85) {
+      console.log('💡 Erreur: Index déjà existant avec options différentes');
+      console.log('   Essayez de supprimer manuellement les index:');
+      console.log('   1. Connectez-vous à MongoDB Compass');
+      console.log('   2. Allez dans la collection "chatarchives"');
+      console.log('   3. Dans l\'onglet "Indexes", supprimez tous les index sauf "_id_"');
+      console.log('   4. Relancez ce script');
+    }
   } finally {
-    await mongoose.disconnect();
-    console.log('🔌 Déconnecté de MongoDB');
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+      console.log('🔌 Déconnecté de MongoDB');
+    }
   }
 }
 
-// Exécuter la migration
-if (require.main === module) {
-  migrateDemandes();
-}
-
-module.exports = migrateDemandes;
+fixChatArchiveIndexes();

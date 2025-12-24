@@ -1,3 +1,4 @@
+// src/models/Notification.js - VERSION CORRIGÉE
 const mongoose = require('mongoose');
 
 const notificationSchema = new mongoose.Schema({
@@ -5,11 +6,11 @@ const notificationSchema = new mongoose.Schema({
   utilisateur: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
-    index: true
+    required: true
+    // RETIRÉ: index: true - Défini plus bas
   },
   
-  // Type de notification - CORRIGÉ
+  // Type de notification
   type: {
     type: String,
     enum: [
@@ -68,7 +69,7 @@ const notificationSchema = new mongoose.Schema({
     maxlength: 500
   },
   
-  // **SYSTÈME UNIVERSEL :** Support pour TOUTES les entités
+  // Système universel : Support pour TOUTES les entités
   entite: {
     type: String,
     enum: [
@@ -93,15 +94,15 @@ const notificationSchema = new mongoose.Schema({
       'reminder',        // Rappels
       'other'            // Autres
     ],
-    required: true,
-    index: true
+    required: true
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // ID de l'entité (peut être ObjectId ou String)
   entiteId: {
     type: mongoose.Schema.Types.Mixed,
-    default: null,
-    index: true
+    default: null
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // Action à effectuer
@@ -135,8 +136,8 @@ const notificationSchema = new mongoose.Schema({
   // État de la notification
   lue: {
     type: Boolean,
-    default: false,
-    index: true
+    default: false
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   lueAt: {
@@ -144,18 +145,18 @@ const notificationSchema = new mongoose.Schema({
     default: null
   },
   
-  // **MÉTADONNÉES FLEXIBLES** pour toutes les entités
+  // Métadonnées flexibles pour toutes les entités
   metadata: {
     type: mongoose.Schema.Types.Mixed,
-    default: {},
+    default: {}
   },
   
   // Priorité
   priorite: {
     type: String,
     enum: ['basse', 'normale', 'haute', 'urgente', 'critique'],
-    default: 'normale',
-    index: true
+    default: 'normale'
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // Catégorie pour le filtrage
@@ -177,8 +178,8 @@ const notificationSchema = new mongoose.Schema({
       'rh',
       'other'
     ],
-    default: 'other',
-    index: true
+    default: 'other'
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // Source de la notification
@@ -198,8 +199,8 @@ const notificationSchema = new mongoose.Schema({
   // Date d'expiration
   expiresAt: {
     type: Date,
-    index: true,
     default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 jours
+    // RETIRÉ: index: true - Défini plus bas
   },
   
   // Pour les notifications récurrentes
@@ -220,12 +221,19 @@ const notificationSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Index composés
-notificationSchema.index({ utilisateur: 1, lue: 1, createdAt: -1 });
-notificationSchema.index({ utilisateur: 1, categorie: 1, lue: 1 });
-notificationSchema.index({ utilisateur: 1, entite: 1, entiteId: 1 });
-notificationSchema.index({ priorite: 1, createdAt: -1 });
-notificationSchema.index({ tags: 1 });
+// TOUS LES INDEX DÉFINIS ICI - CENTRALISÉS
+notificationSchema.index({ utilisateur: 1, lue: 1, createdAt: -1 }); // Pour le filtre par utilisateur et statut
+notificationSchema.index({ utilisateur: 1, categorie: 1, lue: 1 }); // Pour le filtrage par catégorie
+notificationSchema.index({ utilisateur: 1, entite: 1, entiteId: 1 }); // Pour les recherches spécifiques
+notificationSchema.index({ priorite: 1, createdAt: -1 }); // Pour les notifications urgentes
+notificationSchema.index({ tags: 1 }); // Pour la recherche par tags
+notificationSchema.index({ lue: 1 }); // Recherche simple par statut
+notificationSchema.index({ entite: 1 }); // Recherche par type d'entité
+notificationSchema.index({ categorie: 1 }); // Recherche par catégorie
+notificationSchema.index({ expiresAt: 1 }); // Pour le TTL (expiration automatique)
+notificationSchema.index({ declencheur: 1 }); // Recherche par déclencheur
+notificationSchema.index({ type: 1, createdAt: -1 }); // Recherche par type
+notificationSchema.index({ createdAt: -1 }); // Tri global
 
 // Méthode pour marquer comme lu
 notificationSchema.methods.marquerCommeLue = async function() {

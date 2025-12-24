@@ -1,4 +1,6 @@
-// app.js - VERSION CORRIGÉE AVEC CHARGEMENT DE ROUTES FONCTIONNEL
+// app.js - VERSION CORRIGÉE AVEC SCHEDULER ET CHARGEMENT DE ROUTES FONCTIONNEL
+console.log('>>> [DEBUG] Démarrage du script app.js...');
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -10,21 +12,33 @@ const http = require('http');
 const socketIo = require('socket.io');
 const fs = require('fs');
 
-const config = require('./config/env');
+console.log('>>> [DEBUG] Modules natifs chargés.');
+
+let config;
+try {
+  config = require('./config/env');
+  console.log('>>> [DEBUG] Configuration chargée (env:', config.env, ', port:', config.port, ')');
+} catch (error) {
+  console.error('!!! [ERREUR CRITIQUE] Impossible de charger ./config/env :', error);
+  process.exit(1);
+}
 
 const { errorHandler, notFound } = require('./middlewares/errorHandler');
 const connectDB = require('./config/database');
-const workflowRoutes = require('./routes/workflow.routes');
+const SchedulerService = require('./services/SchedulerService');
 
+// NOTE: On charge workflowRoutes plus bas dans la liste dynamique, 
+// mais l'import statique était présent dans votre code. 
+// Je le laisse commenté ou je l'utilise si besoin. 
+// const workflowRoutes = require('./routes/workflow.routes');
 
 const app = express();
 const server = http.createServer(app);
 
-
-
 // ==========================================
 // Configuration WebSocket
 // ==========================================
+console.log('>>> [DEBUG] Configuration WebSocket...');
 const io = socketIo(server, {
   cors: {
     origin: config.env === 'production'
@@ -40,30 +54,69 @@ const io = socketIo(server, {
 global.io = io;
 
 // ==========================================
-// Connexion à MongoDB
+// Fonction de démarrage principale
 // ==========================================
-connectDB().then(async () => {
-
-
-  // Initialiser les templates de notifications
+async function startServer() {
   try {
-    const NotificationTemplateService = require('./services/notificationTemplate.service');
-    await NotificationTemplateService.initialiserTemplatesParDefaut();
+    console.log('>>> [DEBUG] Tentative de connexion MongoDB...');
 
+    // Connexion à MongoDB
+    await connectDB();
+    console.log('>>> [DEBUG] MongoDB connecté avec succès.');
 
-  } catch (error) { }
+    // Initialiser le scheduler
+    if (process.env.ENABLE_SCHEDULER !== 'false') {
+      try {
+        console.log('>>> [DEBUG] Initialisation du SchedulerService...');
+        await SchedulerService.initialize();
+        console.log('>>> [DEBUG] Scheduler initialisé.');
+      } catch (error) {
+        console.error('!!! [ERREUR] Initialisation du scheduler:', error);
+        // Ne pas arrêter le serveur si le scheduler échoue
+      }
+    } else {
+      console.log('>>> [DEBUG] Scheduler désactivé (ENABLE_SCHEDULER=false)');
+    }
 
-  // Configurer les hooks de notifications
-  try {
-    const { setupDemandeHooks } = require('./hooks/notification.hooks');
-    const DemandeForçage = require('./models/DemandeForçage');
+    // Initialiser les templates de notifications
+    try {
+      console.log('>>> [DEBUG] Initialisation templates notifications...');
+      const NotificationTemplateService = require('./services/notificationTemplate.service');
+      await NotificationTemplateService.initialiserTemplatesParDefaut();
+      console.log('>>> [DEBUG] Templates notifications OK.');
+    } catch (error) {
+      console.error('!!! [ERREUR] Initialisation templates notifications :', error);
+    }
 
-    setupDemandeHooks(DemandeForçage);
-  } catch (error) { }
-}).catch(err => {
+    // Configurer les hooks de notifications
+    try {
+      console.log('>>> [DEBUG] Configuration hooks notifications...');
+      const { setupDemandeHooks } = require('./hooks/notification.hooks');
+      const DemandeForçage = require('./models/DemandeForçage');
 
-  process.exit(1);
-});
+      setupDemandeHooks(DemandeForçage);
+      console.log('>>> [DEBUG] Hooks notifications OK.');
+    } catch (error) {
+      console.error('!!! [ERREUR] Configuration hooks notifications :', error);
+    }
+
+    // ... démarrage serveur ...
+    const PORT = config.port || 5000;
+
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log('===================================================');
+      console.log(`>>> [INFO] SERVER RUNNING ON PORT ${PORT}`);
+      console.log(`>>> [INFO] Environment: ${config.env}`);
+      console.log(`>>> [INFO] API URL: http://localhost:${PORT}`);
+      console.log('>>> [INFO] Scheduler:', process.env.ENABLE_SCHEDULER !== 'false' ? 'ACTIF' : 'INACTIF');
+      console.log('===================================================');
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur démarrage:', error);
+    process.exit(1);
+  }
+}
 
 // ==========================================
 // Middlewares de Sécurité
@@ -126,11 +179,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 if (config.env === 'development') {
   app.use(morgan('dev'));
 } else {
-  app.use(morgan('combined', {
-    stream: {
-
-    }
-  }));
+  app.use(morgan('combined'));
 }
 
 app.use(compression());
@@ -139,18 +188,18 @@ app.use(compression());
 // WebSocket Initialisation
 // ==========================================
 io.on('connection', (socket) => {
-
+  console.log('>>> [DEBUG] Nouvelle connexion WebSocket:', socket.id);
 
   // Joindre la salle utilisateur si authentifié
   socket.on('authenticate', (userId) => {
     if (userId) {
+      console.log('>>> [DEBUG] Socket authentifié UserID:', userId);
       socket.join(`user:${userId}`);
-
     }
   });
 
   socket.on('disconnect', (reason) => {
-
+    console.log('>>> [DEBUG] WebSocket disconnect:', socket.id, 'raison:', reason);
   });
 });
 
@@ -158,10 +207,12 @@ io.on('connection', (socket) => {
 // TEST SIMPLE POUR DÉMARRER
 // ==========================================
 app.get('/api/test', (req, res) => {
+  console.log('>>> [DEBUG] Appel GET /api/test');
   res.json({
     success: true,
     message: 'API fonctionnelle',
     timestamp: new Date().toISOString(),
+    scheduler: process.env.ENABLE_SCHEDULER !== 'false' ? 'actif' : 'inactif',
     endpoints: {
       demandes: '/api/v1/demandes',
       auth: '/api/v1/auth',
@@ -185,6 +236,7 @@ app.get('/', (req, res) => {
     version: '2.0.0',
     status: 'running',
     environment: config.env,
+    scheduler: process.env.ENABLE_SCHEDULER !== 'false' ? 'actif' : 'inactif',
     timestamp: new Date().toISOString(),
     endpoints: {
       test: '/api/test',
@@ -204,7 +256,8 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: config.env,
     database: dbStatus,
-    websocket: io.engine.clientsCount > 0 ? 'active' : 'idle'
+    websocket: io.engine.clientsCount > 0 ? 'active' : 'idle',
+    scheduler: process.env.ENABLE_SCHEDULER !== 'false' ? 'actif' : 'inactif'
   });
 });
 
@@ -212,47 +265,40 @@ app.get('/health', (req, res) => {
 // Routes API - CHARGEMENT CORRIGÉ
 // ==========================================
 
-
 // Fonction pour charger une route avec gestion d'erreur améliorée
 function loadRoute(routePath, routeName, mountPath) {
   try {
-    const fullPath = path.join(__dirname, routePath);
+    console.log(`>>> [DEBUG] Chargement route "${routeName}" depuis ${routePath}...`);
 
-    // Vérifier si le fichier existe
-    if (fs.existsSync(fullPath + '.js')) {
+    // Utiliser require avec le chemin relatif directement
+    // Node.js gère automatiquement .js et index.js
+    const routeModule = require(routePath);
 
-      const routeModule = require(fullPath);
-
-      if (routeModule && typeof routeModule === 'function') {
-        app.use(mountPath, routeModule);
-
-        return true;
-      } else if (routeModule && routeModule.router) {
-        app.use(mountPath, routeModule.router || routeModule);
-
-        return true;
-      } else {
-
-        return false;
-      }
-    } else if (fs.existsSync(fullPath + '/index.js')) {
-
-      const routeModule = require(fullPath);
-
-      if (routeModule && typeof routeModule === 'function') {
-        app.use(mountPath, routeModule);
-
-        return true;
-      } else {
-
-        return false;
-      }
+    if (routeModule && typeof routeModule === 'function') {
+      app.use(mountPath, routeModule);
+      console.log(`    -> Route "${routeName}" chargée (function middleware).`);
+      return true;
+    } else if (routeModule && (routeModule.router || routeModule.default)) {
+      // Support pour export default et export router
+      const router = routeModule.router || routeModule.default || routeModule;
+      app.use(mountPath, router);
+      console.log(`    -> Route "${routeName}" chargée (router object).`);
+      return true;
     } else {
-
+      console.warn(`!!! [WARN] Module route "${routeName}" export invalide. Type: ${typeof routeModule}`);
       return false;
     }
-  } catch (error) {
 
+  } catch (error) {
+    // Erreur spécifique si le module n'est pas trouvé
+    if (error.code === 'MODULE_NOT_FOUND') {
+      console.warn(`!!! [WARN] Route "${routeName}" non trouvée: ${routePath}`);
+    } else {
+      console.error(`!!! [ERREUR] Exception lors du chargement de la route "${routeName}":`, error.message);
+      if (config.env === 'development') {
+        console.error('Stack trace:', error.stack);
+      }
+    }
     return false;
   }
 }
@@ -264,7 +310,8 @@ const routesToLoad = [
   { path: './routes/admin.routes', name: 'Administration', mount: '/api/v1/admin' },
   { path: './routes/notification.routes', name: 'Notifications', mount: '/api/v1/notifications' },
   { path: './routes/dashboard.routes', name: 'Dashboard', mount: '/api/v1/dashboard' },
-  { path: './routes/workflow.routes', name: 'Workflow', mount: '/api/v1/demandes' }
+  // Corrigé: workflow.routes avec son propre mount path
+  { path: './routes/workflow.routes', name: 'Workflow', mount: '/api/v1/workflow' }
 ];
 
 // Routes optionnelles (ne bloquent pas le démarrage)
@@ -274,47 +321,48 @@ const optionalRoutes = [
   { path: './routes/chat.routes', name: 'Chat', mount: '/api/v1/chat' }
 ];
 
-
 let loadedRoutes = 0;
-
+console.log('>>> [DEBUG] Début du chargement des routes principales...');
 routesToLoad.forEach(route => {
   if (loadRoute(route.path, route.name, route.mount)) {
     loadedRoutes++;
   }
 });
+console.log(`>>> [DEBUG] Routes principales chargées : ${loadedRoutes}/${routesToLoad.length}`);
 
 
+console.log('>>> [DEBUG] Début du chargement des routes optionnelles...');
 optionalRoutes.forEach(route => {
   try {
     loadRoute(route.path, route.name, route.mount);
   } catch (error) {
-
+    console.error(`!!! [ERREUR] Route optionnelle ${route.name} :`, error);
   }
 });
-
-
 
 // ==========================================
 // Routes API WebSocket
 // ==========================================
 setTimeout(() => {
   try {
+    console.log('>>> [DEBUG] Chargement sockets additionnels...');
     // WebSocket pour les notifications
     const notificationSocketPath = path.join(__dirname, 'websocket/notification.socket.js');
     if (fs.existsSync(notificationSocketPath)) {
       const notificationSocket = require(notificationSocketPath);
       notificationSocket(io);
+      console.log('    -> Notification Socket chargé.');
     }
-
 
     // WebSocket pour le chat
     const chatSocketPath = path.join(__dirname, 'websocket/chat.socket.js');
     if (fs.existsSync(chatSocketPath)) {
       const chatSocket = require(chatSocketPath);
       chatSocket(io);
+      console.log('    -> Chat Socket chargé.');
     }
   } catch (error) {
-
+    console.error('!!! [ERREUR] Chargement sockets :', error);
   }
 }, 1000);
 
@@ -328,51 +376,60 @@ app.use(errorHandler);
 // Gestion des erreurs non capturées
 // ==========================================
 process.on('unhandledRejection', (err) => {
-
+  console.error('!!! [UNHANDLED REJECTION]', err);
 });
 
 process.on('uncaughtException', (err) => {
-
+  console.error('!!! [UNCAUGHT EXCEPTION]', err);
   process.exit(1);
 });
 
 // ==========================================
-// Démarrage du serveur
+// Lancement du serveur
 // ==========================================
-const PORT = config.port || 5000;
-
-server.listen(PORT, '0.0.0.0', () => {
-
-
-
+// Démarrer le serveur
+startServer().catch(error => {
+  console.error('!!! [ERREUR FATALE] Échec du démarrage du serveur:', error);
+  process.exit(1);
 });
 
 // ==========================================
 // Graceful shutdown
 // ==========================================
-const shutdown = (signal) => {
+const shutdown = async (signal) => {
+  console.log(`>>> [INFO] Signal ${signal} received. Closing server...`);
 
+  // Arrêter le scheduler si actif
+  if (process.env.ENABLE_SCHEDULER !== 'false' && SchedulerService) {
+    try {
+      console.log('>>> [INFO] Arrêt du scheduler...');
+      await SchedulerService.shutdown();
+      console.log('>>> [INFO] Scheduler arrêté.');
+    } catch (error) {
+      console.error('!!! [ERREUR] Arrêt du scheduler:', error);
+    }
+  }
 
   // Fermer les connexions WebSocket
   io.close(() => {
-
+    console.log('>>> [INFO] WebSockets closed.');
   });
 
   // Fermer le serveur HTTP
   server.close(() => {
-
+    console.log('>>> [INFO] HTTP server closed.');
 
     // Fermer la connexion MongoDB
     const mongoose = require('mongoose');
     mongoose.connection.close(false, () => {
-
+      console.log('>>> [INFO] MongoDB connection closed.');
       process.exit(0);
     });
   });
 
   // Timeout forcé après 10 secondes
   setTimeout(() => {
-
+    console.error('!!! [WARN] Forced shutdown after timeout.');
     process.exit(1);
   }, 10000);
 };

@@ -1,3 +1,4 @@
+// src/config/database.js   
 const mongoose = require('mongoose');
 const config = require('../config/env'); // Make sure the path to env.js is correct
 
@@ -13,8 +14,6 @@ const connectDB = async () => {
     // Remove 'useNewUrlParser' and 'useUnifiedTopology' options
     await mongoose.connect(mongoURI); // No need for options anymore
 
-
-
     mongoose.connection.on('error', (err) => {
 
     });
@@ -24,10 +23,9 @@ const connectDB = async () => {
     });
 
   } catch (error) {
-
+    console.error('MongoDB connection error:', error);
     process.exit(1);
   }
 };
 
 module.exports = connectDB;
-// src/config/database.js   
