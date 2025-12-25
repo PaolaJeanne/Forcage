@@ -5,8 +5,8 @@
 const express = require('express');
 const router = express.Router();
 const exportController = require('../controllers/export.controller');
-const { authenticate } = require('../middleware/auth.middleware');
-const { requirePermission } = require('../middleware/permission.middleware');
+const { authenticate } = require('../middlewares/auth.middleware');
+const { requirePermission } = require('../middlewares/permission.middleware');
 
 router.use(authenticate);
 

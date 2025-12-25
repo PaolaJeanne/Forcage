@@ -26,6 +26,8 @@ try {
 const { errorHandler, notFound } = require('./middlewares/errorHandler');
 const connectDB = require('./config/database');
 const SchedulerService = require('./services/SchedulerService');
+const exportRoutes = require('./routes/export.routes');
+
 
 // NOTE: On charge workflowRoutes plus bas dans la liste dynamique, 
 // mais l'import statique était présent dans votre code. 
@@ -311,7 +313,9 @@ const routesToLoad = [
   { path: './routes/notification.routes', name: 'Notifications', mount: '/api/v1/notifications' },
   { path: './routes/dashboard.routes', name: 'Dashboard', mount: '/api/v1/dashboard' },
   // Corrigé: workflow.routes avec son propre mount path
-  { path: './routes/workflow.routes', name: 'Workflow', mount: '/api/v1/workflow' }
+  { path: './routes/workflow.routes', name: 'Workflow', mount: '/api/v1/workflow' },
+  { path: './routes/export.routes', name: 'Export', mount: '/api/v1/export' }
+
 ];
 
 // Routes optionnelles (ne bloquent pas le démarrage)
