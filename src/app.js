@@ -26,13 +26,8 @@ try {
 const { errorHandler, notFound } = require('./middlewares/errorHandler');
 const connectDB = require('./config/database');
 const SchedulerService = require('./services/SchedulerService');
-const exportRoutes = require('./routes/export.routes');
 
-
-// NOTE: On charge workflowRoutes plus bas dans la liste dynamique, 
-// mais l'import statique était présent dans votre code. 
-// Je le laisse commenté ou je l'utilise si besoin. 
-// const workflowRoutes = require('./routes/workflow.routes');
+// ⚠️ NE PAS IMPORTER LES ROUTES ICI - Elles seront chargées dynamiquement plus bas
 
 const app = express();
 const server = http.createServer(app);
@@ -102,7 +97,7 @@ async function startServer() {
       console.error('!!! [ERREUR] Configuration hooks notifications :', error);
     }
 
-    // ... démarrage serveur ...
+    // Démarrage serveur
     const PORT = config.port || 5000;
 
     server.listen(PORT, '0.0.0.0', () => {
@@ -264,7 +259,7 @@ app.get('/health', (req, res) => {
 });
 
 // ==========================================
-// Routes API - CHARGEMENT CORRIGÉ
+// Routes API - CHARGEMENT DYNAMIQUE
 // ==========================================
 
 // Fonction pour charger une route avec gestion d'erreur améliorée
@@ -278,13 +273,13 @@ function loadRoute(routePath, routeName, mountPath) {
 
     if (routeModule && typeof routeModule === 'function') {
       app.use(mountPath, routeModule);
-      console.log(`    -> Route "${routeName}" chargée (function middleware).`);
+      console.log(`    ✅ Route "${routeName}" chargée (function middleware).`);
       return true;
     } else if (routeModule && (routeModule.router || routeModule.default)) {
       // Support pour export default et export router
       const router = routeModule.router || routeModule.default || routeModule;
       app.use(mountPath, router);
-      console.log(`    -> Route "${routeName}" chargée (router object).`);
+      console.log(`    ✅ Route "${routeName}" chargée (router object).`);
       return true;
     } else {
       console.warn(`!!! [WARN] Module route "${routeName}" export invalide. Type: ${typeof routeModule}`);
@@ -294,7 +289,7 @@ function loadRoute(routePath, routeName, mountPath) {
   } catch (error) {
     // Erreur spécifique si le module n'est pas trouvé
     if (error.code === 'MODULE_NOT_FOUND') {
-      console.warn(`!!! [WARN] Route "${routeName}" non trouvée: ${routePath}`);
+      console.warn(`    ⚠️  Route "${routeName}" non trouvée: ${routePath}`);
     } else {
       console.error(`!!! [ERREUR] Exception lors du chargement de la route "${routeName}":`, error.message);
       if (config.env === 'development') {
@@ -312,10 +307,10 @@ const routesToLoad = [
   { path: './routes/admin.routes', name: 'Administration', mount: '/api/v1/admin' },
   { path: './routes/notification.routes', name: 'Notifications', mount: '/api/v1/notifications' },
   { path: './routes/dashboard.routes', name: 'Dashboard', mount: '/api/v1/dashboard' },
-  // Corrigé: workflow.routes avec son propre mount path
   { path: './routes/workflow.routes', name: 'Workflow', mount: '/api/v1/workflow' },
-  { path: './routes/export.routes', name: 'Export', mount: '/api/v1/export' }
-
+  { path: './routes/export.routes', name: 'Export', mount: '/api/v1/export' },
+  { path: './routes/sms.routes', name: 'SMS', mount: '/api/v1/sms' },
+  { path: './routes/signature.routes', name: 'Signatures', mount: '/api/v1/signatures' }
 ];
 
 // Routes optionnelles (ne bloquent pas le démarrage)
@@ -334,14 +329,9 @@ routesToLoad.forEach(route => {
 });
 console.log(`>>> [DEBUG] Routes principales chargées : ${loadedRoutes}/${routesToLoad.length}`);
 
-
 console.log('>>> [DEBUG] Début du chargement des routes optionnelles...');
 optionalRoutes.forEach(route => {
-  try {
-    loadRoute(route.path, route.name, route.mount);
-  } catch (error) {
-    console.error(`!!! [ERREUR] Route optionnelle ${route.name} :`, error);
-  }
+  loadRoute(route.path, route.name, route.mount);
 });
 
 // ==========================================
@@ -350,12 +340,13 @@ optionalRoutes.forEach(route => {
 setTimeout(() => {
   try {
     console.log('>>> [DEBUG] Chargement sockets additionnels...');
+    
     // WebSocket pour les notifications
     const notificationSocketPath = path.join(__dirname, 'websocket/notification.socket.js');
     if (fs.existsSync(notificationSocketPath)) {
       const notificationSocket = require(notificationSocketPath);
       notificationSocket(io);
-      console.log('    -> Notification Socket chargé.');
+      console.log('    ✅ Notification Socket chargé.');
     }
 
     // WebSocket pour le chat
@@ -363,7 +354,7 @@ setTimeout(() => {
     if (fs.existsSync(chatSocketPath)) {
       const chatSocket = require(chatSocketPath);
       chatSocket(io);
-      console.log('    -> Chat Socket chargé.');
+      console.log('    ✅ Chat Socket chargé.');
     }
   } catch (error) {
     console.error('!!! [ERREUR] Chargement sockets :', error);
@@ -391,7 +382,6 @@ process.on('uncaughtException', (err) => {
 // ==========================================
 // Lancement du serveur
 // ==========================================
-// Démarrer le serveur
 startServer().catch(error => {
   console.error('!!! [ERREUR FATALE] Échec du démarrage du serveur:', error);
   process.exit(1);

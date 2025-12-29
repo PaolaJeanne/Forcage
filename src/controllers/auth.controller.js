@@ -1,11 +1,10 @@
-// src/controllers/auth.controller.js
+// src/controllers/auth.controller.js - VERSION CORRIGÉE
 const User = require('../models/User');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt.util');
 const { successResponse, errorResponse } = require('../utils/response.util');
 
-
 // ============================================
-// INSCRIPTION - Retourne uniquement l'utilisateur
+// INSCRIPTION
 // ============================================
 const register = async (req, res) => {
   try {
@@ -25,7 +24,6 @@ const register = async (req, res) => {
       return errorResponse(res, 400, 'Cet email est déjà utilisé');
     }
 
-    // Rôle client forcé
     const user = new User({
       nom,
       prenom,
@@ -33,7 +31,7 @@ const register = async (req, res) => {
       password,
       telephone,
       numeroCompte,
-      role: 'client', // ← FORCÉ
+      role: 'client',
       limiteAutorisation: 0,
       classification: 'normal',
       notationClient: 'C',
@@ -42,9 +40,6 @@ const register = async (req, res) => {
 
     await user.save();
 
-
-
-    // OPTIMISATION: À l'inscription, on ne retourne QUE l'utilisateur
     return successResponse(res, 201, 'Inscription réussie', {
       user: {
         id: user._id,
@@ -55,17 +50,17 @@ const register = async (req, res) => {
         telephone: user.telephone,
         numeroCompte: user.numeroCompte
       }
-      // PAS de token ni refreshToken ici
     });
 
   } catch (error) {
-
+    console.error('REGISTER ERROR:', error);
     return errorResponse(res, 500, 'Erreur lors de l\'inscription');
   }
 };
 
 // ============================================
-// CONNEXION - Retourne uniquement les tokens
+// CONNEXION - VERSION CORRIGÉE
+// Retourne token + user pour le frontend
 // ============================================
 const login = async (req, res) => {
   try {
@@ -111,13 +106,28 @@ const login = async (req, res) => {
 
     const refreshToken = generateRefreshToken({ userId: user._id });
 
+    console.log('✅ LOGIN SUCCESS:', user.email);
 
-
-    // OPTIMISATION: À la connexion, on ne retourne QUE les tokens
+    // ✅ CORRECTION: Retourner token + refreshToken + user
     return successResponse(res, 200, 'Connexion réussie', {
       token,
-      refreshToken
-      // PAS d'infos utilisateur ici
+      refreshToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        nom: user.nom,
+        prenom: user.prenom,
+        role: user.role,
+        agence: user.agence,
+        limiteAutorisation: user.limiteAutorisation,
+        telephone: user.telephone,
+        numeroCompte: user.numeroCompte,
+        classification: user.classification,
+        notationClient: user.notationClient,
+        kycValide: user.kycValide,
+        listeSMP: user.listeSMP,
+        isActive: user.isActive
+      }
     });
 
   } catch (error) {
@@ -127,28 +137,25 @@ const login = async (req, res) => {
 };
 
 // ============================================
-// GET PROFILE - Pour récupérer les infos utilisateur
+// GET PROFILE
 // ============================================
 const getProfile = async (req, res) => {
   try {
-    // Récupérer les infos complètes de l'utilisateur
-    const user = await User.findById(req.userId)
-      .select('telephone numeroCompte classification notationClient kycValide dateKyc listeSMP soldeActuel decouvertAutorise');
+    const user = await User.findById(req.userId);
 
     if (!user) {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
 
-    // Retourner toutes les infos utilisateur
     return successResponse(res, 200, 'Profil récupéré', {
       user: {
-        id: req.userId,
-        email: req.user?.email || user.email,
-        nom: req.user?.nom || user.nom,
-        prenom: req.user?.prenom || user.prenom,
-        role: req.user?.role || user.role,
-        agence: req.user?.agence || user.agence,
-        limiteAutorisation: req.user?.limiteAutorisation || user.limiteAutorisation,
+        id: user._id,
+        email: user.email,
+        nom: user.nom,
+        prenom: user.prenom,
+        role: user.role,
+        agence: user.agence,
+        limiteAutorisation: user.limiteAutorisation,
         telephone: user.telephone,
         numeroCompte: user.numeroCompte,
         classification: user.classification,
@@ -165,12 +172,13 @@ const getProfile = async (req, res) => {
     });
 
   } catch (error) {
+    console.error('GET PROFILE ERROR:', error);
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
 
 // ============================================
-// REMAINING FUNCTIONS (unchanged)
+// REFRESH TOKEN
 // ============================================
 const refreshToken = async (req, res) => {
   try {
@@ -203,10 +211,14 @@ const refreshToken = async (req, res) => {
     });
 
   } catch (error) {
+    console.error('REFRESH TOKEN ERROR:', error);
     return errorResponse(res, 401, 'Refresh token invalide');
   }
 };
 
+// ============================================
+// UPDATE PROFILE
+// ============================================
 const updateProfile = async (req, res) => {
   try {
     const { nom, prenom, telephone } = req.body;
@@ -223,7 +235,7 @@ const updateProfile = async (req, res) => {
 
     await user.save();
 
-
+    console.log('✅ PROFILE UPDATED:', user.email);
 
     return successResponse(res, 200, 'Profil mis à jour', {
       user: {
@@ -237,11 +249,14 @@ const updateProfile = async (req, res) => {
     });
 
   } catch (error) {
-
+    console.error('UPDATE PROFILE ERROR:', error);
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
 
+// ============================================
+// CHANGE PASSWORD
+// ============================================
 const changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
@@ -269,7 +284,7 @@ const changePassword = async (req, res) => {
     user.password = newPassword;
     await user.save();
 
-
+    console.log('✅ PASSWORD CHANGED:', user.email);
 
     const newToken = generateToken({
       userId: user._id,
@@ -287,7 +302,7 @@ const changePassword = async (req, res) => {
     });
 
   } catch (error) {
-
+    console.error('CHANGE PASSWORD ERROR:', error);
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
