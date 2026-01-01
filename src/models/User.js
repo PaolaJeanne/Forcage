@@ -57,6 +57,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  cni: {
+    type: String,
+    trim: true
+  },
   numeroCompte: {
     type: String,
     uppercase: true,

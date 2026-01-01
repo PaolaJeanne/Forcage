@@ -2,17 +2,43 @@
 const User = require('../models/User');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt.util');
 const { successResponse, errorResponse } = require('../utils/response.util');
+const { PERMISSIONS } = require('../constants/roles');
+
+// Utilitaire pour obtenir les permissions d'un rôle
+const getPermissionsForRole = (role) => {
+  const permissions = [];
+  for (const [permissionName, allowedRoles] of Object.entries(PERMISSIONS)) {
+    if (allowedRoles.includes(role)) {
+      permissions.push(permissionName);
+    }
+  }
+  // Ajouter des permissions implicites ou frontend-specific si nécessaire
+  // Note: Si le frontend attend "demandes", on peut l'ajouter ici
+  if (permissions.includes('VIEW_OWN_DEMANDE')) {
+    permissions.push('demandes'); // Alias pour compatibilité frontend
+    permissions.push('mesDemandes'); // Alias pour compatibilité frontend
+  }
+  return permissions;
+};
 
 // ============================================
 // INSCRIPTION
 // ============================================
 const register = async (req, res) => {
   try {
-    const { nom, prenom, email, password, telephone, numeroCompte } = req.body;
+    const { nom, prenom, email, password, telephone, numeroCompte, cni } = req.body;
 
-    // Validation
-    if (!nom || !prenom || !email || !password) {
-      return errorResponse(res, 400, 'Tous les champs obligatoires requis');
+    console.log('REGISTER ATTEMPT:', { nom, prenom, email, telephone, numeroCompte, cni });
+
+    // Validation détaillée
+    const missingFields = [];
+    if (!nom) missingFields.push('nom');
+    if (!prenom) missingFields.push('prenom');
+    if (!email) missingFields.push('email');
+    if (!password) missingFields.push('password');
+
+    if (missingFields.length > 0) {
+      return errorResponse(res, 400, `Champs obligatoires manquants: ${missingFields.join(', ')}`);
     }
 
     if (password.length < 6) {
@@ -31,6 +57,7 @@ const register = async (req, res) => {
       password,
       telephone,
       numeroCompte,
+      cni,
       role: 'client',
       limiteAutorisation: 0,
       classification: 'normal',
@@ -48,7 +75,8 @@ const register = async (req, res) => {
         prenom: user.prenom,
         role: user.role,
         telephone: user.telephone,
-        numeroCompte: user.numeroCompte
+        numeroCompte: user.numeroCompte,
+        cni: user.cni
       }
     });
 
@@ -108,7 +136,10 @@ const login = async (req, res) => {
 
     console.log('✅ LOGIN SUCCESS:', user.email);
 
-    // ✅ CORRECTION: Retourner token + refreshToken + user
+    // Obtenir les permissions
+    const permissions = getPermissionsForRole(user.role);
+
+    // ✅ CORRECTION: Retourner token + refreshToken + user + permissions
     return successResponse(res, 200, 'Connexion réussie', {
       token,
       refreshToken,
@@ -118,6 +149,7 @@ const login = async (req, res) => {
         nom: user.nom,
         prenom: user.prenom,
         role: user.role,
+        permissions, // Ajout des permissions explicites
         agence: user.agence,
         limiteAutorisation: user.limiteAutorisation,
         telephone: user.telephone,
@@ -147,6 +179,8 @@ const getProfile = async (req, res) => {
       return errorResponse(res, 404, 'Utilisateur non trouvé');
     }
 
+    const permissions = getPermissionsForRole(user.role);
+
     return successResponse(res, 200, 'Profil récupéré', {
       user: {
         id: user._id,
@@ -154,6 +188,7 @@ const getProfile = async (req, res) => {
         nom: user.nom,
         prenom: user.prenom,
         role: user.role,
+        permissions, // Ajout des permissions
         agence: user.agence,
         limiteAutorisation: user.limiteAutorisation,
         telephone: user.telephone,

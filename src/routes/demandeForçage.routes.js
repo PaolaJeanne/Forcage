@@ -892,4 +892,134 @@ router.get('/health',
   }
 );
 
+
+// AJOUTEZ CETTE ROUTE DANS demandeForçage.routes.js
+// Après la section "ROUTES ADMIN/TOUTES LES DEMANDES"
+// et AVANT la section "ROUTES TRAITEMENT"
+
+/**
+ * @route   GET /api/v1/demandes/statistics
+ * @desc    Obtenir les statistiques des demandes
+ * @access  Private (RM, DCE, ADG, DGA, Risques, Admin)
+ */
+router.get('/statistics',
+  requirePermission('VIEW_STATISTICS'),
+  auditLogger('consultation', 'statistiques'),
+  getStatistiques
+);
+
+// OU utilisez cette version si getStatistiques n'existe pas encore :
+
+/**
+ * @route   GET /api/v1/demandes/statistics
+ * @desc    Obtenir les statistiques des demandes (fallback)
+ * @access  Private (Tous les rôles)
+ */
+router.get('/statistics',
+  authenticate,
+  auditLogger('consultation', 'statistiques'),
+  async (req, res) => {
+    try {
+      const DemandeForçage = require('../models/DemandeForçage');
+      const userId = req.user.id;
+      const userRole = req.user.role;
+
+      // Construction de la query selon le rôle
+      let query = {};
+      
+      if (userRole === 'client') {
+        query.clientId = userId;
+      } else if (userRole === 'conseiller') {
+        query.conseillerId = userId;
+      }
+      // Les autres rôles voient tout
+
+      // Statistiques par statut
+      const statutStats = await DemandeForçage.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: '$statut',
+            count: { $sum: 1 },
+            montantTotal: { $sum: '$montant' }
+          }
+        }
+      ]);
+
+      // Statistiques par type d'opération
+      const typeStats = await DemandeForçage.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: '$typeOperation',
+            count: { $sum: 1 }
+          }
+        }
+      ]);
+
+      // Statistiques générales
+      const [totalDemandes, totalApprouvees, totalRejetees, totalEnAttente] = await Promise.all([
+        DemandeForçage.countDocuments(query),
+        DemandeForçage.countDocuments({ ...query, statut: 'APPROUVEE' }),
+        DemandeForçage.countDocuments({ ...query, statut: 'REJETEE' }),
+        DemandeForçage.countDocuments({ 
+          ...query, 
+          statut: { $in: ['BROUILLON', 'EN_ATTENTE_CONSEILLER', 'EN_ETUDE_CONSEILLER', 'EN_ATTENTE_RM', 'EN_ATTENTE_DCE', 'EN_ATTENTE_ADG'] }
+        })
+      ]);
+
+      // Montant total
+      const montantResult = await DemandeForçage.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: null,
+            montantTotal: { $sum: '$montant' }
+          }
+        }
+      ]);
+
+      const montantTotal = montantResult.length > 0 ? montantResult[0].montantTotal : 0;
+
+      // Calcul du taux d'approbation
+      const tauxApprobation = totalDemandes > 0 
+        ? Math.round((totalApprouvees / totalDemandes) * 100) 
+        : 0;
+
+      res.json({
+        success: true,
+        data: {
+          global: {
+            totalDemandes,
+            totalApprouvees,
+            totalRejetees,
+            totalEnAttente,
+            montantTotal,
+            tauxApprobation
+          },
+          parStatut: statutStats.reduce((acc, item) => {
+            acc[item._id] = {
+              count: item.count,
+              montantTotal: item.montantTotal
+            };
+            return acc;
+          }, {}),
+          parType: typeStats.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+          }, {})
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Erreur statistiques:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des statistiques',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
 module.exports = router;

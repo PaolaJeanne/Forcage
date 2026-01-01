@@ -12,13 +12,13 @@ router.use(authenticate);
 
 // Exporter une demande
 router.get('/demande/:id/pdf',
-  requirePermission('VIEW_DEMANDE'),
+  requirePermission('VIEW_OWN_DEMANDE'),
   exportController.exporterDemande
 );
 
 // Exporter les statistiques
 router.get('/statistiques/pdf',
-  requirePermission('VIEW_ANALYTICS'),
+  requirePermission('VIEW_STATISTICS'),
   exportController.exporterStatistiques
 );
 

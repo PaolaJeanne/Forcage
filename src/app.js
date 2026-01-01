@@ -290,6 +290,7 @@ function loadRoute(routePath, routeName, mountPath) {
     // Erreur spécifique si le module n'est pas trouvé
     if (error.code === 'MODULE_NOT_FOUND') {
       console.warn(`    ⚠️  Route "${routeName}" non trouvée: ${routePath}`);
+      console.warn(`       Détail: ${error.message}`);
     } else {
       console.error(`!!! [ERREUR] Exception lors du chargement de la route "${routeName}":`, error.message);
       if (config.env === 'development') {
@@ -340,7 +341,7 @@ optionalRoutes.forEach(route => {
 setTimeout(() => {
   try {
     console.log('>>> [DEBUG] Chargement sockets additionnels...');
-    
+
     // WebSocket pour les notifications
     const notificationSocketPath = path.join(__dirname, 'websocket/notification.socket.js');
     if (fs.existsSync(notificationSocketPath)) {

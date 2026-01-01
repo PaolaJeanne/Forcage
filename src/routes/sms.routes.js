@@ -2,7 +2,8 @@
 const express = require('express');
 const router = express.Router();
 const smsController = require('../controllers/sms.controller');
-const { authenticate, checkRole } = require('../middlewares/auth.middleware');
+const { authenticate } = require('../middlewares/auth.middleware');
+const checkRole = require('../middlewares/checkRole');
 
 // Toutes les routes nécessitent authentification
 router.use(authenticate);

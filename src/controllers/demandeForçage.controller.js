@@ -1,4 +1,4 @@
-// src/controllers/demandeForçage.controller.js - VERSION ARRANGÉE
+// src/controllers/demandeForçage.controller.js - VERSION CORRIGÉE SSL
 const DemandeForçageService = require('../services/demandeForcage.service');
 const WorkflowService = require('../services/workflow.service');
 const {
@@ -36,7 +36,8 @@ class DemandeForçageController {
    */
   async creerDemande(req, res) {
     try {
-
+      console.log('📥 Création demande - Body:', JSON.stringify(req.body, null, 2));
+      console.log('👤 User:', req.user);
 
       // Vérification rôle client
       if (req.user.role !== 'client') {
@@ -45,24 +46,31 @@ class DemandeForçageController {
 
       const {
         motif,
+        motifDerogation,
         montant,
         typeOperation,
         dateEcheance,
+        dureeExhaustive,
+        tauxInteret,
+        garanties,
+        observations,
         compteDebit,
         compteNumero,
         devise,
-        commentaireInterne
+        commentaireInterne,
+        client: clientDataFromRequest
       } = req.body;
 
       // Validation
       const validation = this.#validerDonneesCreation({
-        motif,
+        motif: motif || motifDerogation,
         montant,
         typeOperation,
-        dateEcheance
+        dateEcheance: dateEcheance || (dureeExhaustive ? new Date(Date.now() + dureeExhaustive * 30 * 24 * 60 * 60 * 1000) : null)
       });
 
       if (!validation.valid) {
+        console.error('❌ Validation échouée:', validation.message);
         return errorResponse(res, 400, validation.message);
       }
 
@@ -71,6 +79,8 @@ class DemandeForçageController {
       if (!client) {
         return errorResponse(res, 404, 'Client introuvable');
       }
+
+      console.log('✅ Client trouvé:', client.email);
 
       // Calculer montants
       const montantDemande = parseFloat(montant);
@@ -82,29 +92,72 @@ class DemandeForçageController {
       // Construire données demande
       const demandeData = await this.#construireDonneesDemande({
         client,
-        motif,
-        montantDemande,
+        motif: motif || motifDerogation,
+        montantDemande: montant,
         typeOperation,
         montantForçageTotal,
         piecesJustificatives,
         dateEcheance,
+        dureeExhaustive,
+        tauxInteret,
+        garanties,
+        observations,
+        motifDerogation,
         compteDebit,
-        compteNumero,
+        compteNumero: compteNumero || (clientDataFromRequest && clientDataFromRequest.numeroCompte),
         devise,
         commentaireInterne,
-        user: req.user
+        user: req.user,
+        clientDataFromRequest
+      });
+
+      console.log('📦 Données demande construites:', {
+        ref: demandeData.numeroReference,
+        montant: demandeData.montant,
+        type: demandeData.typeOperation
       });
 
       // Créer demande
       const nouvelleDemande = await this.#DemandeForçage.create(demandeData);
+      console.log('✅ Demande créée:', nouvelleDemande._id);
 
       // Assigner conseiller
-      await this.#assignerConseillerAutomatique(nouvelleDemande._id, demandeData.agenceId);
+      try {
+        await this.#assignerConseillerAutomatique(nouvelleDemande._id, demandeData.agenceId);
+        console.log('✅ Conseiller assigné');
+      } catch (assignError) {
+        console.warn('⚠️ Erreur assignation conseiller (non bloquante):', assignError.message);
+      }
 
-      // Notification
-      await this.#notifierCreation(nouvelleDemande, req.user);
+      // Mettre à jour les infos du client si fournies
+      if (clientDataFromRequest && req.user.role === 'client') {
+        try {
+          const updateClient = {};
+          if (clientDataFromRequest.cin) updateClient.cni = clientDataFromRequest.cin;
+          if (clientDataFromRequest.numeroCompte) updateClient.numeroCompte = clientDataFromRequest.numeroCompte;
 
+          if (Object.keys(updateClient).length > 0) {
+            await User.findByIdAndUpdate(req.user.id, { $set: updateClient });
+            console.log('✅ Infos client mises à jour');
+          }
+        } catch (updateError) {
+          console.warn('⚠️ Erreur MAJ client (non bloquante):', updateError.message);
+        }
+      }
 
+      // Notification (avec gestion d'erreur SSL)
+      try {
+        await this.#notifierCreation(nouvelleDemande, req.user);
+        console.log('✅ Notification envoyée');
+      } catch (notifError) {
+        // Ne pas bloquer la création si l'email échoue
+        console.warn('⚠️ Erreur notification (non bloquante):', notifError.message);
+        if (notifError.message && notifError.message.includes('SSL')) {
+          console.warn('⚠️ Erreur SSL détectée - Service email probablement mal configuré');
+        }
+      }
+
+      console.log('✅ Demande créée avec succès');
 
       // Réponse
       return successResponse(res, 201, 'Demande créée avec succès', {
@@ -134,8 +187,18 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
-      return errorResponse(res, 500, 'Erreur lors de la création', error.message);
+      console.error('❌ ERREUR CRÉATION DEMANDE:', error);
+      console.error('Stack:', error.stack);
+      
+      // Message d'erreur plus détaillé
+      let errorMessage = 'Erreur lors de la création';
+      if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      return errorResponse(res, 500, errorMessage, {
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     }
   }
 
@@ -172,7 +235,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ Erreur listage demandes:', error);
       return errorResponse(res, 500, 'Erreur serveur', error.message);
     }
   }
@@ -221,7 +284,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ Erreur récupération demande:', error);
       return errorResponse(res, 404, error.message);
     }
   }
@@ -231,12 +294,10 @@ class DemandeForçageController {
    */
   async soumettreDemande(req, res) {
     try {
-
+      console.log('📤 Soumission demande:', req.params.id);
 
       const { id } = req.params;
-      const { commentaire } = req.body || {}; // <-- CORRECTION
-
-
+      const { commentaire } = req.body || {};
 
       // Récupérer demande
       const demande = await this.#DemandeForçage.findById(id);
@@ -244,11 +305,11 @@ class DemandeForçageController {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
 
-
+      console.log('✅ Demande trouvée:', demande.numeroReference);
 
       // Vérifier permissions
       if (!this.#peutSoumettreDemande(demande, req.user)) {
-
+        console.error('❌ Permission refusée');
         return errorResponse(res, 403, 'Vous n\'êtes pas autorisé à soumettre cette demande');
       }
 
@@ -262,7 +323,7 @@ class DemandeForçageController {
         demande.agenceId
       );
 
-
+      console.log('🔄 Transition:', demande.statut, '->', nouveauStatut);
 
       // Mettre à jour demande
       const updated = await this.#mettreAJourStatutDemande(
@@ -271,19 +332,27 @@ class DemandeForçageController {
         nouveauStatut,
         ACTIONS_DEMANDE.SOUMETTRE,
         req.user.id,
-        commentaire || 'Demande soumise pour traitement', // <-- Ici commentaire peut être undefined
+        commentaire || 'Demande soumise pour traitement',
         { dateSoumission: new Date() }
       );
 
       // Assigner conseiller si nécessaire
       if (!updated.conseillerId) {
-        await this.#assignerConseillerAutomatique(updated._id, updated.agenceId);
+        try {
+          await this.#assignerConseillerAutomatique(updated._id, updated.agenceId);
+        } catch (assignError) {
+          console.warn('⚠️ Erreur assignation conseiller:', assignError.message);
+        }
       }
 
-      // Notification
-      await this.#notifierSoumission(updated, req.user);
+      // Notification (avec gestion d'erreur)
+      try {
+        await this.#notifierSoumission(updated, req.user);
+      } catch (notifError) {
+        console.warn('⚠️ Erreur notification:', notifError.message);
+      }
 
-
+      console.log('✅ Demande soumise avec succès');
 
       return successResponse(res, 200, 'Demande soumise avec succès', {
         demande: {
@@ -311,7 +380,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ ERREUR SOUMISSION:', error);
       return errorResponse(res, 500, 'Erreur soumission demande', error.message);
     }
   }
@@ -345,7 +414,7 @@ class DemandeForçageController {
         demande.agenceId
       );
 
-
+      console.log('🔄 Annulation:', demande.statut, '->', nouveauStatut);
 
       // Mettre à jour
       const updated = await this.#mettreAJourStatutDemande(
@@ -359,9 +428,13 @@ class DemandeForçageController {
       );
 
       // Notification
-      await this.#notifierAnnulation(updated, req.user);
+      try {
+        await this.#notifierAnnulation(updated, req.user);
+      } catch (notifError) {
+        console.warn('⚠️ Erreur notification:', notifError.message);
+      }
 
-
+      console.log('✅ Demande annulée');
 
       return successResponse(res, 200, 'Demande annulée avec succès', {
         demande: {
@@ -373,7 +446,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ Erreur annulation:', error);
       return errorResponse(res, 400, error.message);
     }
   }
@@ -383,7 +456,7 @@ class DemandeForçageController {
    */
   async traiterDemande(req, res) {
     try {
-
+      console.log('⚙️ Traitement demande:', req.params.id);
 
       const { id } = req.params;
       const { action, commentaire, montantAutorise } = req.body;
@@ -401,7 +474,7 @@ class DemandeForçageController {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
 
-
+      console.log('✅ Demande trouvée:', demande.numeroReference);
 
       // Vérifier actions disponibles
       const isOwner = demande.clientId && demande.clientId._id.toString() === req.user.id.toString();
@@ -433,7 +506,7 @@ class DemandeForçageController {
         demande.agenceId
       );
 
-
+      console.log('🔄 Transition:', demande.statut, '->', nouveauStatut);
 
       // Préparer données de mise à jour
       const updateData = {};
@@ -462,9 +535,13 @@ class DemandeForçageController {
       );
 
       // Notification
+      try {
+        await this.#notifierTraitement(updated, nouveauStatut, req.user);
+      } catch (notifError) {
+        console.warn('⚠️ Erreur notification:', notifError.message);
+      }
 
-
-
+      console.log('✅ Traitement effectué');
 
       return successResponse(res, 200, `Demande ${action.toLowerCase()} avec succès`, {
         demande: {
@@ -501,7 +578,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ ERREUR TRAITEMENT:', error);
       return errorResponse(res, 500, 'Erreur traitement demande', error.message);
     }
   }
@@ -542,7 +619,7 @@ class DemandeForçageController {
         demande.agenceId
       );
 
-
+      console.log('🔄 Remontée:', demande.statut, '->', nouveauStatut);
 
       // Mettre à jour
       const updated = await this.#mettreAJourStatutDemande(
@@ -556,9 +633,13 @@ class DemandeForçageController {
       );
 
       // Notification
-      await this.#notifierChangementStatut(updated, nouveauStatut, req.user);
+      try {
+        await this.#notifierChangementStatut(updated, nouveauStatut, req.user);
+      } catch (notifError) {
+        console.warn('⚠️ Erreur notification:', notifError.message);
+      }
 
-
+      console.log('✅ Demande remontée');
 
       return successResponse(res, 200, 'Demande remontée au niveau supérieur', {
         demande: {
@@ -570,7 +651,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ Erreur remontée:', error);
       return errorResponse(res, 400, error.message);
     }
   }
@@ -611,7 +692,7 @@ class DemandeForçageController {
         demande.agenceId
       );
 
-
+      console.log('🔄 Régularisation:', demande.statut, '->', nouveauStatut);
 
       // Mettre à jour
       const updated = await this.#mettreAJourStatutDemande(
@@ -628,9 +709,13 @@ class DemandeForçageController {
       );
 
       // Notification
-      await this.#notifierRegularisation(updated, req.user);
+      try {
+        await this.#notifierRegularisation(updated, req.user);
+      } catch (notifError) {
+        console.warn('⚠️ Erreur notification:', notifError.message);
+      }
 
-
+      console.log('✅ Demande régularisée');
 
       return successResponse(res, 200, 'Demande régularisée avec succès', {
         demande: {
@@ -643,7 +728,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ Erreur régularisation:', error);
       return errorResponse(res, 400, error.message);
     }
   }
@@ -669,7 +754,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ Erreur statistiques:', error);
       return errorResponse(res, 500, 'Erreur serveur', error.message);
     }
   }
@@ -703,9 +788,13 @@ class DemandeForçageController {
       ).populate('clientId', 'nom prenom email');
 
       // Notification
-      await this.#notifierModification(demandeMaj, req.user);
+      try {
+        await this.#notifierModification(demandeMaj, req.user);
+      } catch (notifError) {
+        console.warn('⚠️ Erreur notification:', notifError.message);
+      }
 
-
+      console.log('✅ Demande mise à jour');
 
       return successResponse(res, 200, 'Demande mise à jour avec succès', {
         demande: {
@@ -719,7 +808,7 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-
+      console.error('❌ Erreur MAJ demande:', error);
       return errorResponse(res, 500, 'Erreur lors de la mise à jour', error.message);
     }
   }
@@ -744,7 +833,7 @@ class DemandeForçageController {
       return { valid: false, message: 'Type d\'opération requis' };
     }
 
-    const operationsValides = ['VIREMENT', 'PRELEVEMENT', 'CHEQUE', 'CARTE', 'RETRAIT', 'AUTRE'];
+    const operationsValides = Object.values(TYPES_OPERATION);
     if (!operationsValides.includes(typeOperation.toUpperCase())) {
       return { valid: false, message: `Type d'opération invalide` };
     }
@@ -789,16 +878,22 @@ class DemandeForçageController {
     const {
       client,
       motif,
+      motifDerogation,
       montantDemande,
       typeOperation,
       montantForçageTotal,
       piecesJustificatives,
       dateEcheance,
+      dureeExhaustive,
+      tauxInteret,
+      garanties,
+      observations,
       compteDebit,
       compteNumero,
       devise,
       commentaireInterne,
-      user
+      user,
+      clientDataFromRequest
     } = options;
 
     // Générer référence
@@ -832,12 +927,17 @@ class DemandeForçageController {
       scoreRisque: WorkflowService.calculateRiskLevel(montantDemande, notationClient),
       piecesJustificatives,
       devise: devise || 'XAF',
+      dureeExhaustive,
+      tauxInteret,
+      garanties,
+      observations,
+      motifDerogation,
       historique: [{
         action: 'CREATION',
         statutAvant: null,
         statutApres: STATUTS_DEMANDE.BROUILLON,
         userId: user.id,
-        commentaire: 'Demande créée',
+        commentaire: 'Demande créée via formulaire simple',
         timestamp: new Date()
       }]
     };
@@ -872,6 +972,7 @@ class DemandeForçageController {
 
       return `${prefix}${String(sequence).padStart(4, '0')}`;
     } catch (error) {
+      console.warn('⚠️ Erreur génération référence, utilisation fallback');
       return `DF${Date.now().toString().slice(-8)}`;
     }
   }
@@ -892,13 +993,19 @@ class DemandeForçageController {
           $set: { conseillerId: conseiller._id }
         });
 
-        await this.#notifierAssignationConseiller(demandeId, conseiller._id);
+        try {
+          await this.#notifierAssignationConseiller(demandeId, conseiller._id);
+        } catch (notifError) {
+          console.warn('⚠️ Erreur notification assignation:', notifError.message);
+        }
 
         return conseiller;
       }
 
+      console.warn('⚠️ Aucun conseiller disponible');
       return null;
     } catch (error) {
+      console.error('❌ Erreur assignation conseiller:', error);
       return null;
     }
   }
@@ -936,48 +1043,36 @@ class DemandeForçageController {
    * Construire filtres selon rôle
    */
   #construireFiltres(req) {
-  const { role, id: userId, agence, email } = req.user;
+    const { role, id: userId, agence, email } = req.user;
 
-  const filters = {};
+    const filters = {};
 
-  switch (role) {
-    case 'client':
-      filters.clientId = userId;
-      break;
+    switch (role) {
+      case 'client':
+        filters.clientId = userId;
+        break;
 
-    case 'conseiller':
-      // Option 1: Le conseiller voit les demandes qui lui sont assignées
-      filters.conseillerId = userId;
-      
-      // Option 2: OU les demandes de son agence qui sont en attente
-      // filters.$or = [
-      //   { conseillerId: userId },
-      //   { 
-      //     $and: [
-      //       { agenceId: agence },
-      //       { statut: { $in: ['EN_ATTENTE_CONSEILLER', 'EN_ETUDE_CONSEILLER'] } }
-      //     ]
-      //   }
-      // ];
-      break;
+      case 'conseiller':
+        filters.conseillerId = userId;
+        break;
 
-    case 'rm':
-    case 'dce':
-      filters.agenceId = agence; // Note: Le champ est agenceId, pas agence
-      break;
+      case 'rm':
+      case 'dce':
+        filters.agenceId = agence;
+        break;
 
-    case 'admin':
-    case 'dga':
-    case 'risques':
-      // Pas de filtre - voient tout
-      break;
+      case 'admin':
+      case 'dga':
+      case 'risques':
+        // Pas de filtre - voient tout
+        break;
 
-    default:
-      filters.clientId = userId;
+      default:
+        filters.clientId = userId;
+    }
+
+    return filters;
   }
-
-  return filters;
-}
 
   /**
    * Construire options pagination/tri
@@ -1180,7 +1275,7 @@ class DemandeForçageController {
     return enrichies;
   }
 
-  // ==================== NOTIFICATIONS ====================
+  // ==================== NOTIFICATIONS (avec gestion d'erreur SSL) ====================
 
   async #notifierCreation(demande, user) {
     try {
@@ -1202,6 +1297,7 @@ class DemandeForçageController {
         });
       }
     } catch (error) {
+      console.warn('⚠️ Erreur notification création (non bloquante):', error.message);
     }
   }
 
@@ -1220,6 +1316,7 @@ class DemandeForçageController {
         });
       }
     } catch (error) {
+      console.warn('⚠️ Erreur notification soumission (non bloquante):', error.message);
     }
   }
 
@@ -1238,6 +1335,7 @@ class DemandeForçageController {
         });
       }
     } catch (error) {
+      console.warn('⚠️ Erreur notification annulation (non bloquante):', error.message);
     }
   }
 
@@ -1256,6 +1354,7 @@ class DemandeForçageController {
         });
       }
     } catch (error) {
+      console.warn('⚠️ Erreur notification modification (non bloquante):', error.message);
     }
   }
 
@@ -1278,6 +1377,7 @@ class DemandeForçageController {
         });
       }
     } catch (error) {
+      console.warn('⚠️ Erreur notification régularisation (non bloquante):', error.message);
     }
   }
 
@@ -1298,17 +1398,17 @@ class DemandeForçageController {
       });
 
     } catch (error) {
+      console.warn('⚠️ Erreur notification assignation (non bloquante):', error.message);
     }
   }
 
   async #notifierChangementStatut(demande, nouveauStatut, user) {
     try {
-      // Envoyer notifications
-      if (notifications.length > 0) {
-        await this.#Notification.insertMany(notifications);
-      }
-
+      // Logique de notification selon le changement de statut
+      // Cette fonction peut être développée selon vos besoins
+      console.log(`📧 Notification changement statut: ${demande.statut} -> ${nouveauStatut}`);
     } catch (error) {
+      console.warn('⚠️ Erreur notification changement statut (non bloquante):', error.message);
     }
   }
 }

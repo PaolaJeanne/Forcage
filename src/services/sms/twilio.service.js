@@ -6,15 +6,31 @@ class TwilioSMSService {
     this.accountSid = process.env.TWILIO_ACCOUNT_SID;
     this.authToken = process.env.TWILIO_AUTH_TOKEN;
     this.phoneNumber = process.env.TWILIO_PHONE_NUMBER;
-    
-    this.client = twilio(this.accountSid, this.authToken);
+
+    this.client = null;
+  }
+
+  getClient() {
+    if (!this.client) {
+      if (!this.accountSid || !this.accountSid.startsWith('AC')) {
+        console.warn('⚠️ Twilio Account SID manquant ou invalide. Les fonctions SMS Twilio seront désactivées.');
+        return null;
+      }
+      this.client = twilio(this.accountSid, this.authToken);
+    }
+    return this.client;
   }
 
   async sendSMS(phoneNumber, message, options = {}) {
     try {
       const formattedNumber = this.formatPhoneNumber(phoneNumber);
-      
-      const response = await this.client.messages.create({
+
+      const client = this.getClient();
+      if (!client) {
+        return { success: false, error: 'Twilio n\'est pas configuré' };
+      }
+
+      const response = await client.messages.create({
         body: message,
         from: this.phoneNumber,
         to: formattedNumber,
@@ -35,7 +51,7 @@ class TwilioSMSService {
 
     } catch (error) {
       console.error('❌ Erreur envoi SMS Twilio:', error);
-      
+
       return {
         success: false,
         provider: 'twilio',
@@ -48,7 +64,7 @@ class TwilioSMSService {
   formatPhoneNumber(phone) {
     // Format international: +225XXXXXXXX
     let cleaned = phone.replace(/\s/g, '');
-    
+
     if (cleaned.startsWith('00')) {
       cleaned = '+' + cleaned.substring(2);
     } else if (cleaned.startsWith('0')) {
@@ -56,14 +72,18 @@ class TwilioSMSService {
     } else if (!cleaned.startsWith('+')) {
       cleaned = '+225' + cleaned;
     }
-    
+
     return cleaned;
   }
 
   async getBalance() {
     try {
-      const balance = await this.client.balance.fetch();
-      
+      const client = this.getClient();
+      if (!client) {
+        return { success: false, error: 'Twilio n\'est pas configuré' };
+      }
+      const balance = await client.balance.fetch();
+
       return {
         success: true,
         balance: balance.balance,

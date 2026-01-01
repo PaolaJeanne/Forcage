@@ -8,12 +8,14 @@ const NotificationService = require('../services/notification.service');
 const newlyCreatedDocs = new Set();
 
 // Hook pour le modèle DemandeForçage
+// Hook pour le modèle DemandeForçage
 function setupDemandeHooks(DemandeForçage) {
   if (!DemandeForçage || !DemandeForçage.schema) {
     return;
   }
 
   // Hook PRE-save pour marquer les nouveaux documents
+  // Note: function non-async avec next fonctionne
   DemandeForçage.schema.pre('save', function (next) {
 
     // Marquer comme nouvellement créé si c'est un nouveau document
@@ -25,7 +27,8 @@ function setupDemandeHooks(DemandeForçage) {
   });
 
   // Hook POST-save pour les notifications
-  DemandeForçage.schema.post('save', async function (doc, next) {
+  // CORRECTION: async post hooks ne doivent pas utiliser next() dans Mongoose moderne
+  DemandeForçage.schema.post('save', async function (doc) {
     try {
       const docId = doc._id.toString();
       const isNew = newlyCreatedDocs.has(docId);
@@ -50,12 +53,13 @@ function setupDemandeHooks(DemandeForçage) {
 
     } catch (error) {
       // Ne pas bloquer l'opération
+      console.error('Error in post-save hook:', error);
     }
-    next();
   });
 
   // Hook pour les mises à jour via findOneAndUpdate
-  DemandeForçage.schema.post('findOneAndUpdate', async function (result, next) {
+  // CORRECTION: async post hooks ne doivent pas utiliser next()
+  DemandeForçage.schema.post('findOneAndUpdate', async function (result) {
     try {
       if (result) {
 
@@ -67,12 +71,13 @@ function setupDemandeHooks(DemandeForçage) {
               await NotificationService.notifyDemandeUpdated(updatedDoc);
             }
           } catch (err) {
+            console.error('Error in post-findOneAndUpdate timeout:', err);
           }
         }, 100);
       }
     } catch (error) {
+      console.error('Error in post-findOneAndUpdate hook:', error);
     }
-    next();
   });
 }
 

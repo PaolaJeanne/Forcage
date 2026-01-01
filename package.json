@@ -6,11 +6,11 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "clean-admin": "node src/scripts/createCleanAdmin.js",
-    "clean:db": "node scripts/cleanDatabase.js",
+    "clean:db": "node src/scripts/cleanDatabase.js",
     "reset-db": "node src/scripts/reset-database.js",
     "clean:indexes": "node src/scripts/create-cleanup-scripts.js",
-    "scheduler": "node scripts/init-scheduler.js",
-    "scheduler:test": "ENABLE_SCHEDULER=true NODE_ENV=development node scripts/init-scheduler.js"
+    "scheduler": "node src/scripts/init-scheduler.js",
+    "scheduler:test": "ENABLE_SCHEDULER=true NODE_ENV=development node src/scripts/init-scheduler.js"
   },
   "keywords": [
     "express",
@@ -21,8 +21,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "aws-sdk": "^2.1693.0",
-    "bcrypt": "^5.1.1",
+    "axios": "^1.13.2",
     "bcryptjs": "^3.0.3",
     "chart.js": "^4.5.1",
     "compression": "^1.8.1",
@@ -45,11 +44,10 @@
     "pdfkit": "^0.17.2",
     "pdfkit-table": "^0.1.99",
     "qrcode": "^1.5.4",
-    "react-chartjs-2": "^5.3.1",
     "socket.io": "^4.8.2",
+    "twilio": "^5.11.1",
     "winston": "^3.19.0",
-    "ws": "^8.18.3",
-    "zod": "^4.1.13"
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

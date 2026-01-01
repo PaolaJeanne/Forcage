@@ -90,6 +90,10 @@ const DemandeForçageSchema = new Schema({
     required: true,
     trim: true
   },
+  motifDerogation: {
+    type: String,
+    trim: true
+  },
   montant: {
     type: Number,
     required: true,
@@ -109,6 +113,10 @@ const DemandeForçageSchema = new Schema({
     enum: DEVISE,
     default: 'XAF'
   },
+  dureeExhaustive: Number,
+  tauxInteret: Number,
+  garanties: [String],
+  observations: String,
 
   // Évaluation et notation
   notationClient: {
