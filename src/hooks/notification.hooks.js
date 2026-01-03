@@ -1,5 +1,9 @@
 /**
  * Hooks simples pour les notifications automatiques
+ * 
+ * NOTE: Les notifications sont maintenant gérées directement par le controller
+ * pour avoir un meilleur contrôle et éviter les doublons.
+ * Ces hooks sont conservés pour la compatibilité mais ne font rien.
  */
 
 const NotificationService = require('../services/notification.service');
@@ -8,73 +12,44 @@ const NotificationService = require('../services/notification.service');
 const newlyCreatedDocs = new Set();
 
 // Hook pour le modèle DemandeForçage
-// Hook pour le modèle DemandeForçage
 function setupDemandeHooks(DemandeForçage) {
   if (!DemandeForçage || !DemandeForçage.schema) {
     return;
   }
 
   // Hook PRE-save pour marquer les nouveaux documents
-  // Note: function non-async avec next fonctionne
   DemandeForçage.schema.pre('save', function (next) {
-
     // Marquer comme nouvellement créé si c'est un nouveau document
     if (this.isNew) {
       newlyCreatedDocs.add(this._id.toString());
     }
-
     next();
   });
 
-  // Hook POST-save pour les notifications
-  // CORRECTION: async post hooks ne doivent pas utiliser next() dans Mongoose moderne
+  // Hook POST-save - DÉSACTIVÉ
+  // Les notifications sont maintenant gérées par le controller
+  // pour éviter les doublons et avoir un meilleur contrôle
   DemandeForçage.schema.post('save', async function (doc) {
     try {
       const docId = doc._id.toString();
-      const isNew = newlyCreatedDocs.has(docId);
-
-      if (isNew) {
-        // Notification création de demande
-        await NotificationService.notifyDemandeCreated(doc);
-
-        // Nettoyer le cache
+      
+      // Nettoyer le cache
+      if (newlyCreatedDocs.has(docId)) {
         newlyCreatedDocs.delete(docId);
-      } else {
-        // Notification mise à jour de demande
-        await NotificationService.notifyDemandeUpdated(doc);
-
-        // Vérifier les changements de statut spécifiquement
-        const original = await DemandeForçage.findById(doc._id);
-        if (original && original.statut !== doc.statut) {
-          const changedBy = doc.updatedBy || doc.conseillerId || null;
-          await NotificationService.notifyDemandeStatusChanged(doc, original.statut, changedBy);
-        }
       }
-
+      
+      // Les notifications sont envoyées par le controller
+      // Pas d'action ici
     } catch (error) {
-      // Ne pas bloquer l'opération
       console.error('Error in post-save hook:', error);
     }
   });
 
-  // Hook pour les mises à jour via findOneAndUpdate
-  // CORRECTION: async post hooks ne doivent pas utiliser next()
+  // Hook pour les mises à jour via findOneAndUpdate - DÉSACTIVÉ
   DemandeForçage.schema.post('findOneAndUpdate', async function (result) {
     try {
-      if (result) {
-
-        // Attendre un peu pour être sûr que le document est mis à jour
-        setTimeout(async () => {
-          try {
-            const updatedDoc = await DemandeForçage.findById(result._id);
-            if (updatedDoc) {
-              await NotificationService.notifyDemandeUpdated(updatedDoc);
-            }
-          } catch (err) {
-            console.error('Error in post-findOneAndUpdate timeout:', err);
-          }
-        }, 100);
-      }
+      // Les notifications sont envoyées par le controller
+      // Pas d'action ici
     } catch (error) {
       console.error('Error in post-findOneAndUpdate hook:', error);
     }

@@ -48,8 +48,14 @@ class DemandeForçageService {
   // ==================== LISTAGE ====================
   static async listerDemandes(filters = {}, options = {}) {
     try {
+      const logger = require('../utils/logger.util').child('DEMANDE_SERVICE');
+      logger.header('LIST DEMANDES', '📋');
+      
       const { page = 1, limit = 20, sort = '-createdAt' } = options;
       const skip = (page - 1) * limit;
+
+      logger.debug('Filters:', filters);
+      logger.debug('Options:', { page, limit, sort, skip });
 
       // Construire la query
       let query = {};
@@ -71,7 +77,10 @@ class DemandeForçageService {
           { motif: { $regex: filters.search, $options: 'i' } },
           { 'clientId.nom': { $regex: filters.search, $options: 'i' } }
         ];
+        logger.debug('Search filter applied', { search: filters.search });
       }
+
+      logger.database('FIND', 'DemandeForçage', query);
 
       // Exécuter la requête
       const [demandes, total] = await Promise.all([
@@ -85,8 +94,12 @@ class DemandeForçageService {
         DemandeForçage.countDocuments(query)
       ]);
 
+      logger.success(`Found ${demandes.length} demandes`, { total, page, limit });
+
       // Calculer la pagination
       const totalPages = Math.ceil(total / limit);
+
+      logger.footer();
 
       return {
         demandes,
@@ -101,7 +114,9 @@ class DemandeForçageService {
       };
 
     } catch (error) {
-
+      const logger = require('../utils/logger.util').child('DEMANDE_SERVICE');
+      logger.error('Error listing demandes', error);
+      logger.footer();
       throw error;
     }
   }
@@ -109,9 +124,15 @@ class DemandeForçageService {
   // ==================== CONSULTATION ====================
   static async getDemandeById(id) {
     try {
+      const logger = require('../utils/logger.util').child('DEMANDE_SERVICE');
+      logger.debug('Getting demande by ID', { id });
+      
       if (!mongoose.Types.ObjectId.isValid(id)) {
+        logger.validation('ObjectId', false, `Invalid ID: ${id}`);
         throw new Error('ID de demande invalide');
       }
+
+      logger.database('FIND', 'DemandeForçage', { _id: id });
 
       const demande = await DemandeForçage.findById(id)
         .populate('clientId', 'nom prenom email telephone notationClient classification')
@@ -119,13 +140,17 @@ class DemandeForçageService {
         .lean();
 
       if (!demande) {
+        logger.warn('Demande not found', { id });
         throw new Error('Demande non trouvée');
       }
+
+      logger.success('Demande found', { ref: demande.numeroReference, id: demande._id });
 
       return demande;
 
     } catch (error) {
-
+      const logger = require('../utils/logger.util').child('DEMANDE_SERVICE');
+      logger.error('Error getting demande', error);
       throw error;
     }
   }
@@ -179,19 +204,31 @@ class DemandeForçageService {
   // ==================== TRAITEMENT ====================
   static async traiterDemande(demandeId, userId, action, options = {}) {
     try {
-
-
+      const logger = require('../utils/logger.util').child('DEMANDE_SERVICE');
+      logger.header('PROCESS DEMANDE', '⚙️');
+      
       const { commentaire, montantAutorise, conditionsParticulieres } = options;
+
+      logger.debug('Processing demande', { demandeId, userId, action });
+      logger.database('FIND', 'DemandeForçage', { _id: demandeId });
 
       const demande = await DemandeForçage.findById(demandeId);
       if (!demande) {
+        logger.warn('Demande not found', { demandeId });
+        logger.footer();
         throw new Error('Demande non trouvée');
       }
 
+      logger.success('Demande found', { ref: demande.numeroReference });
+
       // Vérifier que l'utilisateur peut traiter cette demande
       if (!demande.canBeProcessedBy({ id: userId, role: await this.getUserRole(userId) })) {
+        logger.permission(false, `process_demande_${demandeId}`, { id: userId });
+        logger.footer();
         throw new Error('Vous ne pouvez pas traiter cette demande');
       }
+
+      logger.permission(true, `process_demande_${demandeId}`, { id: userId });
 
       // Vérifier les actions disponibles
       const userRole = await this.getUserRole(userId);
@@ -200,7 +237,11 @@ class DemandeForçageService {
         role: userRole
       });
 
+      logger.debug('Available actions', { actions: actionsDisponibles, requestedAction: action });
+
       if (!actionsDisponibles.includes(action)) {
+        logger.warn('Action not available', { action, available: actionsDisponibles });
+        logger.footer();
         throw new Error(`Action "${action}" non autorisée`);
       }
 
@@ -209,7 +250,11 @@ class DemandeForçageService {
         const montant = montantAutorise || demande.montant;
         const limite = LIMITES_AUTORISATION[userRole];
 
+        logger.debug('Checking authorization limit', { montant, limite, role: userRole });
+
         if (limite !== undefined && limite !== Infinity && montant > limite) {
+          logger.warn('Authorization limit exceeded', { montant, limite });
+          logger.footer();
           throw new Error(`Montant (${montant}) dépasse votre limite d'autorisation (${limite})`);
         }
       }
@@ -223,6 +268,8 @@ class DemandeForçageService {
         demande.notationClient,
         demande.agenceId
       );
+
+      logger.workflow(action, demande.statut, nouveauStatut, { montantAutorise, userRole });
 
       // Mettre à jour la demande
       const updateData = {
@@ -268,11 +315,16 @@ class DemandeForçageService {
       Object.assign(demande, updateData);
       await demande.save();
 
+      logger.success('Demande processed', { action, newStatus: nouveauStatut });
+      logger.database('UPDATE', 'DemandeForçage', { id: demande._id, status: nouveauStatut });
+      logger.footer();
 
       return demande;
 
     } catch (error) {
-
+      const logger = require('../utils/logger.util').child('DEMANDE_SERVICE');
+      logger.error('Error processing demande', error);
+      logger.footer();
       throw error;
     }
   }
@@ -600,9 +652,10 @@ class DemandeForçageService {
       }
 
       // Trouver un conseiller disponible dans l'agence
+      // ✅ CORRIGÉ: Utiliser agencyId (ObjectId) au lieu de agence (String)
       const conseiller = await User.findOne({
         role: 'conseiller',
-        agence: demande.agenceId || 'Agence Centrale',
+        agencyId: demande.agencyId,
         isActive: true
       }).sort({ chargeTravail: 1 }); // Prendre le moins chargé
 

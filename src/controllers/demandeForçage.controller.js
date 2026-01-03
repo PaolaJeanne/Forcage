@@ -1,34 +1,21 @@
-// src/controllers/demandeForçage.controller.js - VERSION CORRIGÉE SSL
+// src/controllers/demandeForçage.controller.js - VERSION CORRIGÉE COMPLÈTE
 const DemandeForçageService = require('../services/demandeForcage.service');
 const WorkflowService = require('../services/workflow.service');
+const NotificationService = require('../services/notification.service');
 const {
   STATUTS_DEMANDE,
   ACTIONS_DEMANDE,
   PRIORITES,
   NOTATIONS_CLIENT,
-  TYPES_OPERATION
+  TYPES_OPERATION,
+  SCORES_RISQUE
 } = require('../constants/roles');
 const { validationResult } = require('express-validator');
 const { successResponse, errorResponse } = require('../utils/response.util');
-
 const User = require('../models/User');
-const NotificationService = require('../services/notification.service');
 
 class DemandeForçageController {
-
-  // ==================== VARIABLES PRIVÉES ====================
-  #DemandeForçage = null;
-  #Notification = null;
-
-  constructor() {
-    this.#initializeModels();
-  }
-
-  #initializeModels() {
-    this.#DemandeForçage = require('../models/DemandeForçage');
-    this.#Notification = require('../models/Notification');
-  }
-
+  
   // ==================== MÉTHODES PUBLIQUES ====================
 
   /**
@@ -57,8 +44,7 @@ class DemandeForçageController {
         compteDebit,
         compteNumero,
         devise,
-        commentaireInterne,
-        client: clientDataFromRequest
+        commentaireInterne
       } = req.body;
 
       // Validation
@@ -66,7 +52,7 @@ class DemandeForçageController {
         motif: motif || motifDerogation,
         montant,
         typeOperation,
-        dateEcheance: dateEcheance || (dureeExhaustive ? new Date(Date.now() + dureeExhaustive * 30 * 24 * 60 * 60 * 1000) : null)
+        dateEcheance
       });
 
       if (!validation.valid) {
@@ -80,7 +66,10 @@ class DemandeForçageController {
         return errorResponse(res, 404, 'Client introuvable');
       }
 
-      console.log('✅ Client trouvé:', client.email);
+      console.log('✅ Client trouvé:', {
+        email: client.email,
+        nom: `${client.prenom} ${client.nom}`
+      });
 
       // Calculer montants
       const montantDemande = parseFloat(montant);
@@ -93,7 +82,7 @@ class DemandeForçageController {
       const demandeData = await this.#construireDonneesDemande({
         client,
         motif: motif || motifDerogation,
-        montantDemande: montant,
+        montantDemande,
         typeOperation,
         montantForçageTotal,
         piecesJustificatives,
@@ -104,50 +93,41 @@ class DemandeForçageController {
         observations,
         motifDerogation,
         compteDebit,
-        compteNumero: compteNumero || (clientDataFromRequest && clientDataFromRequest.numeroCompte),
+        compteNumero: compteNumero || client.numeroCompte,
         devise,
         commentaireInterne,
-        user: req.user,
-        clientDataFromRequest
+        user: req.user
       });
 
       console.log('📦 Données demande construites:', {
         ref: demandeData.numeroReference,
         montant: demandeData.montant,
-        type: demandeData.typeOperation
+        type: demandeData.typeOperation,
+        priorite: demandeData.priorite
       });
 
       // Créer demande
-      const nouvelleDemande = await this.#DemandeForçage.create(demandeData);
-      console.log('✅ Demande créée:', nouvelleDemande._id);
+      const DemandeForçage = this.#getDemandeModel();
+      const nouvelleDemande = await DemandeForçage.create(demandeData);
+      
+      // Peupler les informations client
+      const demandePopulee = await DemandeForçage.findById(nouvelleDemande._id)
+        .populate('clientId', 'nom prenom email telephone')
+        .populate('conseillerId', 'nom prenom email');
+
+      console.log('✅ Demande créée avec ID:', demandePopulee._id);
 
       // Assigner conseiller
       try {
-        await this.#assignerConseillerAutomatique(nouvelleDemande._id, demandeData.agenceId);
+        await this.#assignerConseillerAutomatique(demandePopulee._id, demandePopulee.agenceId);
         console.log('✅ Conseiller assigné');
       } catch (assignError) {
         console.warn('⚠️ Erreur assignation conseiller (non bloquante):', assignError.message);
       }
 
-      // Mettre à jour les infos du client si fournies
-      if (clientDataFromRequest && req.user.role === 'client') {
-        try {
-          const updateClient = {};
-          if (clientDataFromRequest.cin) updateClient.cni = clientDataFromRequest.cin;
-          if (clientDataFromRequest.numeroCompte) updateClient.numeroCompte = clientDataFromRequest.numeroCompte;
-
-          if (Object.keys(updateClient).length > 0) {
-            await User.findByIdAndUpdate(req.user.id, { $set: updateClient });
-            console.log('✅ Infos client mises à jour');
-          }
-        } catch (updateError) {
-          console.warn('⚠️ Erreur MAJ client (non bloquante):', updateError.message);
-        }
-      }
-
       // Notification (avec gestion d'erreur SSL)
       try {
-        await this.#notifierCreation(nouvelleDemande, req.user);
+        await this.#notifierCreation(demandePopulee, req.user);
         console.log('✅ Notification envoyée');
       } catch (notifError) {
         // Ne pas bloquer la création si l'email échoue
@@ -162,23 +142,24 @@ class DemandeForçageController {
       // Réponse
       return successResponse(res, 201, 'Demande créée avec succès', {
         demande: {
-          id: nouvelleDemande._id,
-          numeroReference: nouvelleDemande.numeroReference,
-          statut: nouvelleDemande.statut,
-          montant: nouvelleDemande.montant,
-          typeOperation: nouvelleDemande.typeOperation,
-          scoreRisque: nouvelleDemande.scoreRisque,
-          priorite: nouvelleDemande.priorite,
-          dateEcheance: nouvelleDemande.dateEcheance,
-          piecesJustificatives: nouvelleDemande.piecesJustificatives,
-          createdAt: nouvelleDemande.createdAt
+          id: demandePopulee._id,
+          numeroReference: demandePopulee.numeroReference,
+          statut: demandePopulee.statut,
+          montant: demandePopulee.montant,
+          typeOperation: demandePopulee.typeOperation,
+          scoreRisque: demandePopulee.scoreRisque,
+          priorite: demandePopulee.priorite,
+          dateEcheance: demandePopulee.dateEcheance,
+          piecesJustificatives: demandePopulee.piecesJustificatives,
+          createdAt: demandePopulee.createdAt,
+          clientNomComplet: `${demandePopulee.clientId.prenom} ${demandePopulee.clientId.nom}`
         },
         workflowInfo: {
           prochainesActions: WorkflowService.getAvailableActions(
             STATUTS_DEMANDE.BROUILLON,
             req.user.role,
-            nouvelleDemande.montant,
-            nouvelleDemande.notationClient,
+            demandePopulee.montant,
+            demandePopulee.notationClient,
             true
           ),
           statutActuel: STATUTS_DEMANDE.BROUILLON,
@@ -191,7 +172,7 @@ class DemandeForçageController {
       console.error('Stack:', error.stack);
       
       // Message d'erreur plus détaillé
-      let errorMessage = 'Erreur lors de la création';
+      let errorMessage = 'Erreur lors de la création de la demande';
       if (error.message) {
         errorMessage = error.message;
       }
@@ -207,19 +188,30 @@ class DemandeForçageController {
    */
   async listerDemandes(req, res) {
     try {
+      const logger = require('../utils/logger.util').child('DEMANDE_LIST');
+      logger.header('LIST DEMANDES', '📋');
+      logger.request('GET', '/demandes', req.user);
+      
       const filters = this.#construireFiltres(req);
       const options = this.#construireOptions(req);
 
+      logger.debug('Filters applied:', filters);
+      logger.debug('Options:', options);
+      
       const result = await DemandeForçageService.listerDemandes(filters, options);
+      logger.success(`Found ${result.demandes.length} demandes`, { total: result.pagination.total });
 
       // Adapter la réponse
-      const demandesAdaptees = this.#adapterReponseDemandes(result.demandes, req.user.role);
+      const demandesAdaptees = await this.#adapterReponseDemandes(result.demandes, req.user);
 
       // Ajouter actions disponibles
       const demandesAvecActions = demandesAdaptees.map(demande => ({
         ...demande,
         actionsDisponibles: this.#getActionsDisponibles(demande, req.user)
       }));
+
+      logger.response(200, 'Demandes listées');
+      logger.footer();
 
       return successResponse(res, 200, 'Liste des demandes récupérée', {
         demandes: demandesAvecActions,
@@ -235,8 +227,12 @@ class DemandeForçageController {
       });
 
     } catch (error) {
-      console.error('❌ Erreur listage demandes:', error);
-      return errorResponse(res, 500, 'Erreur serveur', error.message);
+      const logger = require('../utils/logger.util').child('DEMANDE_LIST');
+      logger.error('Error listing demandes', error);
+      logger.footer();
+      return errorResponse(res, 500, 'Erreur serveur lors du listage des demandes', {
+        message: error.message
+      });
     }
   }
 
@@ -245,15 +241,34 @@ class DemandeForçageController {
    */
   async getDemande(req, res) {
     try {
-      const demande = await DemandeForçageService.getDemandeById(req.params.id);
+      const logger = require('../utils/logger.util').child('DEMANDE_GET');
+      logger.header('GET DEMANDE', '🔍');
+      logger.request('GET', `/demandes/${req.params.id}`, req.user);
+      
+      const demandeId = req.params.id;
+      logger.debug('Demande ID:', { id: demandeId });
+      
+      const demande = await DemandeForçageService.getDemandeById(demandeId);
+
+      if (!demande) {
+        logger.warn('Demande not found', { id: demandeId });
+        logger.footer();
+        return errorResponse(res, 404, 'Demande non trouvée');
+      }
+
+      logger.success('Demande found', { ref: demande.numeroReference });
 
       // Vérifier permissions
       if (!this.#verifierPermissionDemande(demande, req.user)) {
+        logger.permission(false, `view_demande_${demandeId}`, req.user);
+        logger.footer();
         return errorResponse(res, 403, 'Accès non autorisé à cette demande');
       }
 
+      logger.permission(true, `view_demande_${demandeId}`, req.user);
+
       // Formater réponse
-      const reponseFormatee = this.#formaterReponseDemande(demande, req.user);
+      const reponseFormatee = await this.#formaterReponseDemande(demande, req.user);
 
       // Ajouter actions disponibles
       const isOwner = demande.clientId && demande.clientId._id.toString() === req.user.id;
@@ -279,13 +294,18 @@ class DemandeForçageController {
         )
       };
 
+      logger.response(200, 'Demande retrieved');
+      logger.footer();
+
       return successResponse(res, 200, 'Détails de la demande', {
         demande: reponseFormatee
       });
 
     } catch (error) {
-      console.error('❌ Erreur récupération demande:', error);
-      return errorResponse(res, 404, error.message);
+      const logger = require('../utils/logger.util').child('DEMANDE_GET');
+      logger.error('Error fetching demande', error);
+      logger.footer();
+      return errorResponse(res, 404, error.message || 'Demande non trouvée');
     }
   }
 
@@ -300,7 +320,9 @@ class DemandeForçageController {
       const { commentaire } = req.body || {};
 
       // Récupérer demande
-      const demande = await this.#DemandeForçage.findById(id);
+      const DemandeForçage = this.#getDemandeModel();
+      const demande = await DemandeForçage.findById(id);
+      
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
@@ -336,10 +358,15 @@ class DemandeForçageController {
         { dateSoumission: new Date() }
       );
 
+      // Peupler les informations
+      const demandePopulee = await DemandeForçage.findById(updated._id)
+        .populate('clientId', 'nom prenom email')
+        .populate('conseillerId', 'nom prenom email');
+
       // Assigner conseiller si nécessaire
-      if (!updated.conseillerId) {
+      if (!demandePopulee.conseillerId) {
         try {
-          await this.#assignerConseillerAutomatique(updated._id, updated.agenceId);
+          await this.#assignerConseillerAutomatique(demandePopulee._id, demandePopulee.agenceId);
         } catch (assignError) {
           console.warn('⚠️ Erreur assignation conseiller:', assignError.message);
         }
@@ -347,7 +374,7 @@ class DemandeForçageController {
 
       // Notification (avec gestion d'erreur)
       try {
-        await this.#notifierSoumission(updated, req.user);
+        await this.#notifierSoumission(demandePopulee, req.user);
       } catch (notifError) {
         console.warn('⚠️ Erreur notification:', notifError.message);
       }
@@ -356,32 +383,32 @@ class DemandeForçageController {
 
       return successResponse(res, 200, 'Demande soumise avec succès', {
         demande: {
-          id: updated._id,
-          numeroReference: updated.numeroReference,
-          statut: updated.statut,
-          updatedAt: updated.updatedAt,
-          conseiller: updated.conseillerId
+          id: demandePopulee._id,
+          numeroReference: demandePopulee.numeroReference,
+          statut: demandePopulee.statut,
+          updatedAt: demandePopulee.updatedAt,
+          conseiller: demandePopulee.conseillerId
         },
         workflowInfo: {
           prochainesActions: WorkflowService.getAvailableActions(
             nouveauStatut,
             'conseiller',
-            updated.montant,
-            updated.notationClient || 'C'
+            demandePopulee.montant,
+            demandePopulee.notationClient || 'C'
           ),
           responsable: WorkflowService.getResponsibleRole(nouveauStatut),
           delaiEstime: WorkflowService.calculatePriority(
-            updated.dateEcheance || new Date(),
-            updated.montant,
-            updated.notationClient || 'C',
-            updated.typeOperation
+            demandePopulee.dateEcheance || new Date(),
+            demandePopulee.montant,
+            demandePopulee.notationClient || 'C',
+            demandePopulee.typeOperation
           )
         }
       });
 
     } catch (error) {
       console.error('❌ ERREUR SOUMISSION:', error);
-      return errorResponse(res, 500, 'Erreur soumission demande', error.message);
+      return errorResponse(res, 500, 'Erreur lors de la soumission de la demande', error.message);
     }
   }
 
@@ -393,7 +420,8 @@ class DemandeForçageController {
       const { id } = req.params;
       const { commentaire } = req.body || {};
 
-      const demande = await this.#DemandeForçage.findById(id);
+      const DemandeForçage = this.#getDemandeModel();
+      const demande = await DemandeForçage.findById(id);
 
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
@@ -427,9 +455,13 @@ class DemandeForçageController {
         { dateAnnulation: new Date() }
       );
 
+      // Peupler les informations
+      const demandePopulee = await DemandeForçage.findById(updated._id)
+        .populate('clientId', 'nom prenom email');
+
       // Notification
       try {
-        await this.#notifierAnnulation(updated, req.user);
+        await this.#notifierAnnulation(demandePopulee, req.user);
       } catch (notifError) {
         console.warn('⚠️ Erreur notification:', notifError.message);
       }
@@ -438,16 +470,16 @@ class DemandeForçageController {
 
       return successResponse(res, 200, 'Demande annulée avec succès', {
         demande: {
-          id: updated._id,
-          numeroReference: updated.numeroReference,
-          statut: updated.statut,
-          updatedAt: updated.updatedAt
+          id: demandePopulee._id,
+          numeroReference: demandePopulee.numeroReference,
+          statut: demandePopulee.statut,
+          updatedAt: demandePopulee.updatedAt
         }
       });
 
     } catch (error) {
       console.error('❌ Erreur annulation:', error);
-      return errorResponse(res, 400, error.message);
+      return errorResponse(res, 400, error.message || 'Erreur lors de l\'annulation');
     }
   }
 
@@ -466,9 +498,10 @@ class DemandeForçageController {
       }
 
       // Récupérer demande
-      const demande = await this.#DemandeForçage.findById(id)
-        .populate('clientId', 'email nom')
-        .populate('conseillerId', 'email nom');
+      const DemandeForçage = this.#getDemandeModel();
+      const demande = await DemandeForçage.findById(id)
+        .populate('clientId', 'email nom prenom')
+        .populate('conseillerId', 'email nom prenom');
 
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
@@ -516,10 +549,11 @@ class DemandeForçageController {
 
       // Si validation par RM/DCE/ADG
       if (action === ACTIONS_DEMANDE.VALIDER && ['rm', 'dce', 'adg'].includes(req.user.role)) {
-        updateData[`validePar_${req.user.role}`] = {
+        const validationField = `validePar_${req.user.role}`;
+        updateData[validationField] = {
           userId: req.user.id,
           date: new Date(),
-          commentaire: commentaire
+          commentaire: commentaire || `Validé par ${req.user.role.toUpperCase()}`
         };
       }
 
@@ -534,9 +568,14 @@ class DemandeForçageController {
         updateData
       );
 
+      // Peupler les informations
+      const demandePopulee = await DemandeForçage.findById(updated._id)
+        .populate('clientId', 'email nom prenom')
+        .populate('conseillerId', 'email nom prenom');
+
       // Notification
       try {
-        await this.#notifierTraitement(updated, nouveauStatut, req.user);
+        await this.#notifierTraitement(demandePopulee, nouveauStatut, req.user);
       } catch (notifError) {
         console.warn('⚠️ Erreur notification:', notifError.message);
       }
@@ -545,13 +584,13 @@ class DemandeForçageController {
 
       return successResponse(res, 200, `Demande ${action.toLowerCase()} avec succès`, {
         demande: {
-          id: updated._id,
-          numeroReference: updated.numeroReference,
-          statut: updated.statut,
-          montantAutorise: updated.montantAutorise,
-          dateEcheance: updated.dateEcheance,
-          updatedAt: updated.updatedAt,
-          conseiller: updated.conseillerId
+          id: demandePopulee._id,
+          numeroReference: demandePopulee.numeroReference,
+          statut: demandePopulee.statut,
+          montantAutorise: demandePopulee.montantAutorise,
+          dateEcheance: demandePopulee.dateEcheance,
+          updatedAt: demandePopulee.updatedAt,
+          conseiller: demandePopulee.conseillerId
         },
         traitement: {
           action: action,
@@ -564,22 +603,22 @@ class DemandeForçageController {
           prochainesActions: WorkflowService.getAvailableActions(
             nouveauStatut,
             req.user.role,
-            updated.montant,
-            updated.notationClient || 'C'
+            demandePopulee.montant,
+            demandePopulee.notationClient || 'C'
           ),
           responsable: WorkflowService.getResponsibleRole(nouveauStatut),
           delaiEstime: WorkflowService.calculatePriority(
-            updated.dateEcheance || new Date(),
-            updated.montant,
-            updated.notationClient || 'C',
-            updated.typeOperation
+            demandePopulee.dateEcheance || new Date(),
+            demandePopulee.montant,
+            demandePopulee.notationClient || 'C',
+            demandePopulee.typeOperation
           )
         }
       });
 
     } catch (error) {
       console.error('❌ ERREUR TRAITEMENT:', error);
-      return errorResponse(res, 500, 'Erreur traitement demande', error.message);
+      return errorResponse(res, 500, 'Erreur lors du traitement de la demande', error.message);
     }
   }
 
@@ -592,7 +631,9 @@ class DemandeForçageController {
       const { commentaire } = req.body;
 
       // Récupérer demande
-      const demande = await this.#DemandeForçage.findById(id);
+      const DemandeForçage = this.#getDemandeModel();
+      const demande = await DemandeForçage.findById(id);
+      
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
@@ -652,7 +693,7 @@ class DemandeForçageController {
 
     } catch (error) {
       console.error('❌ Erreur remontée:', error);
-      return errorResponse(res, 400, error.message);
+      return errorResponse(res, 400, error.message || 'Erreur lors de la remontée');
     }
   }
 
@@ -665,7 +706,9 @@ class DemandeForçageController {
       const { commentaire } = req.body;
 
       // Récupérer demande
-      const demande = await this.#DemandeForçage.findById(id);
+      const DemandeForçage = this.#getDemandeModel();
+      const demande = await DemandeForçage.findById(id);
+      
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
@@ -708,9 +751,13 @@ class DemandeForçageController {
         }
       );
 
+      // Peupler les informations
+      const demandePopulee = await DemandeForçage.findById(updated._id)
+        .populate('clientId', 'nom prenom email');
+
       // Notification
       try {
-        await this.#notifierRegularisation(updated, req.user);
+        await this.#notifierRegularisation(demandePopulee, req.user);
       } catch (notifError) {
         console.warn('⚠️ Erreur notification:', notifError.message);
       }
@@ -719,17 +766,17 @@ class DemandeForçageController {
 
       return successResponse(res, 200, 'Demande régularisée avec succès', {
         demande: {
-          id: updated._id,
-          numeroReference: updated.numeroReference,
-          regularisee: updated.regularisee,
-          dateRegularisation: updated.dateRegularisation,
-          updatedAt: updated.updatedAt
+          id: demandePopulee._id,
+          numeroReference: demandePopulee.numeroReference,
+          regularisee: demandePopulee.regularisee,
+          dateRegularisation: demandePopulee.dateRegularisation,
+          updatedAt: demandePopulee.updatedAt
         }
       });
 
     } catch (error) {
       console.error('❌ Erreur régularisation:', error);
-      return errorResponse(res, 400, error.message);
+      return errorResponse(res, 400, error.message || 'Erreur lors de la régularisation');
     }
   }
 
@@ -755,7 +802,7 @@ class DemandeForçageController {
 
     } catch (error) {
       console.error('❌ Erreur statistiques:', error);
-      return errorResponse(res, 500, 'Erreur serveur', error.message);
+      return errorResponse(res, 500, 'Erreur lors de la récupération des statistiques', error.message);
     }
   }
 
@@ -769,8 +816,15 @@ class DemandeForçageController {
         return errorResponse(res, 400, 'Données invalides', errors.array());
       }
 
+      const DemandeForçage = this.#getDemandeModel();
+      
       // Vérifier permissions
-      const demande = await DemandeForçageService.getDemandeById(req.params.id);
+      const demande = await DemandeForçage.findById(req.params.id)
+        .populate('clientId', '_id');
+
+      if (!demande) {
+        return errorResponse(res, 404, 'Demande non trouvée');
+      }
 
       if (demande.clientId._id.toString() !== req.user.id && req.user.role !== 'admin') {
         return errorResponse(res, 403, 'Seul le propriétaire ou un admin peut modifier');
@@ -781,7 +835,7 @@ class DemandeForçageController {
       }
 
       // Mettre à jour
-      const demandeMaj = await this.#DemandeForçage.findOneAndUpdate(
+      const demandeMaj = await DemandeForçage.findOneAndUpdate(
         { _id: req.params.id },
         { $set: req.body },
         { new: true }
@@ -892,8 +946,7 @@ class DemandeForçageController {
       compteNumero,
       devise,
       commentaireInterne,
-      user,
-      clientDataFromRequest
+      user
     } = options;
 
     // Générer référence
@@ -907,6 +960,8 @@ class DemandeForçageController {
       notationClient,
       typeOperation
     );
+
+    const scoreRisque = WorkflowService.calculateRiskLevel(montantDemande, notationClient);
 
     const demandeData = {
       numeroReference,
@@ -924,7 +979,7 @@ class DemandeForçageController {
       montantForçageTotal,
       statut: STATUTS_DEMANDE.BROUILLON,
       priorite,
-      scoreRisque: WorkflowService.calculateRiskLevel(montantDemande, notationClient),
+      scoreRisque,
       piecesJustificatives,
       devise: devise || 'XAF',
       dureeExhaustive,
@@ -932,6 +987,10 @@ class DemandeForçageController {
       garanties,
       observations,
       motifDerogation,
+      clientNom: client.nom,
+      clientPrenom: client.prenom,
+      clientEmail: client.email,
+      clientTelephone: client.telephone,
       historique: [{
         action: 'CREATION',
         statutAvant: null,
@@ -943,7 +1002,23 @@ class DemandeForçageController {
     };
 
     // Champs optionnels
-    if (dateEcheance) demandeData.dateEcheance = new Date(dateEcheance);
+    if (dateEcheance) {
+      // dateEcheance contient le nombre de mois
+      const nombreMois = parseInt(dateEcheance);
+      
+      if (!isNaN(nombreMois) && nombreMois > 0) {
+        // Calculer la date d'échéance: aujourd'hui + nombre de mois
+        const today = new Date();
+        const echeance = new Date(today.getFullYear(), today.getMonth() + nombreMois, today.getDate());
+        demandeData.dateEcheance = echeance;
+      } else {
+        // Si le nombre de mois est invalide, utiliser la date par défaut (J+15)
+        demandeData.dateEcheance = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+      }
+    } else {
+      // Date par défaut: J+15
+      demandeData.dateEcheance = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+    }
     if (compteDebit) demandeData.compteDebit = compteDebit;
     if (commentaireInterne) demandeData.commentaireInterne = commentaireInterne;
 
@@ -955,12 +1030,13 @@ class DemandeForçageController {
    */
   async #genererReference() {
     try {
+      const DemandeForçage = this.#getDemandeModel();
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
       const prefix = `DF${year}${month}`;
 
-      const lastDemande = await this.#DemandeForçage.findOne({
+      const lastDemande = await DemandeForçage.findOne({
         numeroReference: new RegExp(`^${prefix}`)
       }).sort({ numeroReference: -1 });
 
@@ -982,19 +1058,20 @@ class DemandeForçageController {
    */
   async #assignerConseillerAutomatique(demandeId, agence) {
     try {
+      const DemandeForçage = this.#getDemandeModel();
       const conseiller = await User.findOne({
         role: 'conseiller',
         agence: agence || 'Agence Centrale',
         isActive: true
-      }).select('_id email');
+      }).select('_id email nom prenom');
 
       if (conseiller) {
-        await this.#DemandeForçage.findByIdAndUpdate(demandeId, {
+        await DemandeForçage.findByIdAndUpdate(demandeId, {
           $set: { conseillerId: conseiller._id }
         });
 
         try {
-          await this.#notifierAssignationConseiller(demandeId, conseiller._id);
+          await this.#notifierAssignationConseiller(demandeId, conseiller);
         } catch (notifError) {
           console.warn('⚠️ Erreur notification assignation:', notifError.message);
         }
@@ -1002,7 +1079,7 @@ class DemandeForçageController {
         return conseiller;
       }
 
-      console.warn('⚠️ Aucun conseiller disponible');
+      console.warn('⚠️ Aucun conseiller disponible pour l\'agence:', agence);
       return null;
     } catch (error) {
       console.error('❌ Erreur assignation conseiller:', error);
@@ -1014,6 +1091,7 @@ class DemandeForçageController {
    * Mettre à jour statut demande
    */
   async #mettreAJourStatutDemande(demandeId, statutAvant, statutApres, action, userId, commentaire, updateData = {}) {
+    const DemandeForçage = this.#getDemandeModel();
     const update = {
       $set: {
         statut: statutApres,
@@ -1032,7 +1110,7 @@ class DemandeForçageController {
       }
     };
 
-    return await this.#DemandeForçage.findByIdAndUpdate(
+    return await DemandeForçage.findByIdAndUpdate(
       demandeId,
       update,
       { new: true }
@@ -1043,7 +1121,8 @@ class DemandeForçageController {
    * Construire filtres selon rôle
    */
   #construireFiltres(req) {
-    const { role, id: userId, agence, email } = req.user;
+    const { role, id: userId, agence } = req.user;
+    const { statut, priorite, dateDebut, dateFin } = req.query;
 
     const filters = {};
 
@@ -1053,7 +1132,8 @@ class DemandeForçageController {
         break;
 
       case 'conseiller':
-        filters.conseillerId = userId;
+        // Conseillers see all demandes in their agency
+        filters.agenceId = agence;
         break;
 
       case 'rm':
@@ -1064,11 +1144,22 @@ class DemandeForçageController {
       case 'admin':
       case 'dga':
       case 'risques':
-        // Pas de filtre - voient tout
+      case 'adg':
+        // Pas de filtre par défaut - voient tout
         break;
 
       default:
         filters.clientId = userId;
+    }
+
+    // Filtres additionnels
+    if (statut) filters.statut = statut;
+    if (priorite) filters.priorite = priorite;
+    
+    if (dateDebut || dateFin) {
+      filters.createdAt = {};
+      if (dateDebut) filters.createdAt.$gte = new Date(dateDebut);
+      if (dateFin) filters.createdAt.$lte = new Date(dateFin);
     }
 
     return filters;
@@ -1088,8 +1179,34 @@ class DemandeForçageController {
   /**
    * Adapter réponse demandes selon rôle
    */
-  #adapterReponseDemandes(demandes, role) {
-    return demandes.map(demande => {
+  async #adapterReponseDemandes(demandes, user) {
+    const role = user.role;
+    
+    return demandes.map((demande, index) => {
+      // Logging pour déboguer
+      console.log(`🔍 Demande ${index}:`, {
+        id: demande._id,
+        ref: demande.numeroReference,
+        clientId: demande.clientId,
+        clientNom: demande.clientNom,
+        clientPrenom: demande.clientPrenom,
+        hasClientObject: !!demande.clientId && typeof demande.clientId === 'object'
+      });
+
+      // Extraire les informations client
+      let clientNomComplet = 'N/A';
+      let clientEmail = 'N/A';
+      
+      if (demande.clientId && typeof demande.clientId === 'object') {
+        // Client est un objet populé
+        clientNomComplet = `${demande.clientId.prenom || ''} ${demande.clientId.nom || ''}`.trim() || 'N/A';
+        clientEmail = demande.clientId.email || 'N/A';
+      } else if (demande.clientNom && demande.clientPrenom) {
+        // Utiliser les champs stockés directement
+        clientNomComplet = `${demande.clientPrenom} ${demande.clientNom}`.trim();
+        clientEmail = demande.clientEmail || 'N/A';
+      }
+
       const base = {
         id: demande._id,
         numeroReference: demande.numeroReference,
@@ -1099,24 +1216,28 @@ class DemandeForçageController {
         scoreRisque: demande.scoreRisque,
         priorite: demande.priorite || 'NORMALE',
         createdAt: demande.createdAt,
-        enRetard: demande.enRetard,
+        enRetard: demande.enRetard || false,
+        dateEcheance: demande.dateEcheance,
         joursRestants: demande.dateEcheance ?
-          Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null
+          Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null,
+        clientNomComplet: clientNomComplet
       };
 
       // Infos supplémentaires selon rôle
       if (role !== 'client') {
-        base.client = demande.clientId ? {
-          id: demande.clientId._id,
-          nom: demande.clientId.nom,
-          prenom: demande.clientId.prenom,
+        base.client = {
+          id: demande.clientId?._id || demande.clientId,
+          nom: demande.clientId?.nom || demande.clientNom || 'N/A',
+          prenom: demande.clientId?.prenom || demande.clientPrenom || 'N/A',
+          email: clientEmail,
           agence: demande.agenceId
-        } : null;
+        };
 
         if (['conseiller', 'rm', 'dce', 'admin', 'dga', 'adg', 'risques'].includes(role)) {
           base.conseiller = demande.conseillerId;
           base.notationClient = demande.notationClient || 'C';
           base.agenceId = demande.agenceId;
+          base.montantAutorise = demande.montantAutorise;
         }
       }
 
@@ -1142,22 +1263,31 @@ class DemandeForçageController {
    * Vérifier permission sur demande
    */
   #verifierPermissionDemande(demande, user) {
-    // Admins voient tout
-    if (['admin', 'dga', 'risques'].includes(user.role)) return true;
+    // Admins et rôles supérieurs voient tout
+    if (['admin', 'dga', 'risques', 'adg'].includes(user.role)) return true;
 
     // Client voit ses demandes
-    if (user.role === 'client' && demande.clientId._id.toString() === user.id) return true;
+    if (user.role === 'client') {
+      const clientId = demande.clientId._id ? demande.clientId._id.toString() : demande.clientId.toString();
+      return clientId === user.id;
+    }
 
-    // Conseiller voit ses demandes assignées
-    if (user.role === 'conseiller' && demande.conseillerId && demande.conseillerId._id.toString() === user.id) return true;
+    // Conseiller voit les demandes de son agence (assignées ou non)
+    if (user.role === 'conseiller') {
+      // Peut voir les demandes assignées à lui
+      if (demande.conseillerId) {
+        const conseillerId = demande.conseillerId._id ? demande.conseillerId._id.toString() : demande.conseillerId.toString();
+        if (conseillerId === user.id) return true;
+      }
+      
+      // Peut aussi voir les demandes de son agence (même si non assignées)
+      return demande.agenceId === user.agence;
+    }
 
     // RM/DCE voient les demandes de leur agence
     if (['rm', 'dce'].includes(user.role)) {
       return demande.agenceId === user.agence;
     }
-
-    // ADG peut voir toutes les demandes
-    if (user.role === 'adg') return true;
 
     return false;
   }
@@ -1165,7 +1295,7 @@ class DemandeForçageController {
   /**
    * Formater réponse détaillée
    */
-  #formaterReponseDemande(demande, user) {
+  async #formaterReponseDemande(demande, user) {
     const base = {
       id: demande._id,
       numeroReference: demande.numeroReference,
@@ -1176,36 +1306,44 @@ class DemandeForçageController {
       scoreRisque: demande.scoreRisque,
       priorite: demande.priorite || 'NORMALE',
       createdAt: demande.createdAt,
-      enRetard: demande.enRetard,
+      enRetard: demande.enRetard || false,
+      dateEcheance: demande.dateEcheance,
       joursRestants: demande.dateEcheance ?
-        Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null
+        Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null,
+      clientNomComplet: demande.clientNomComplet || 
+        (demande.clientId ? `${demande.clientId.prenom} ${demande.clientId.nom}` : 
+        (demande.clientPrenom && demande.clientNom ? `${demande.clientPrenom} ${demande.clientNom}` : 'Client'))
     };
 
     // Infos client
     base.client = {
-      id: demande.clientId._id,
-      nom: demande.clientId.nom,
-      prenom: demande.clientId.prenom
+      id: demande.clientId._id ? demande.clientId._id : demande.clientId,
+      nom: demande.clientId.nom || demande.clientNom,
+      prenom: demande.clientId.prenom || demande.clientPrenom
     };
 
     // Infos supplémentaires selon rôle
     if (user.role !== 'client') {
-      base.client.email = demande.clientId.email;
-      base.client.telephone = demande.clientId.telephone;
-      base.client.notationClient = demande.clientId.notationClient;
-      base.client.classification = demande.clientId.classification;
+      base.client.email = demande.clientId.email || demande.clientEmail;
+      base.client.telephone = demande.clientId.telephone || demande.clientTelephone;
+      base.client.notationClient = demande.notationClient || 'C';
+      base.client.classification = demande.classification;
 
       base.agenceId = demande.agenceId;
       base.conseiller = demande.conseillerId;
       base.montantAutorise = demande.montantAutorise;
-      base.dateEcheance = demande.dateEcheance;
       base.commentaireTraitement = demande.commentaireTraitement;
+      base.piecesJustificatives = demande.piecesJustificatives;
 
       if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
         base.soldeActuel = demande.soldeActuel;
         base.decouvertAutorise = demande.decouvertAutorise;
         base.montantForçageTotal = demande.montantForçageTotal;
         base.historique = demande.historique;
+        base.validePar_conseiller = demande.validePar_conseiller;
+        base.validePar_rm = demande.validePar_rm;
+        base.validePar_dce = demande.validePar_dce;
+        base.validePar_adg = demande.validePar_adg;
       }
     }
 
@@ -1216,7 +1354,8 @@ class DemandeForçageController {
    * Vérifier si peut soumettre
    */
   #peutSoumettreDemande(demande, user) {
-    return demande.clientId.toString() === user.id.toString() &&
+    const clientId = demande.clientId._id ? demande.clientId._id.toString() : demande.clientId.toString();
+    return clientId === user.id.toString() &&
       demande.statut === STATUTS_DEMANDE.BROUILLON;
   }
 
@@ -1224,7 +1363,8 @@ class DemandeForçageController {
    * Vérifier si peut annuler
    */
   #peutAnnulerDemande(demande, user) {
-    return demande.clientId.toString() === user.id.toString() || user.role === 'admin';
+    const clientId = demande.clientId._id ? demande.clientId._id.toString() : demande.clientId.toString();
+    return clientId === user.id.toString() || ['admin', 'dga'].includes(user.role);
   }
 
   /**
@@ -1238,6 +1378,8 @@ class DemandeForçageController {
     }
 
     if (req.query.dateDebut) filters.dateDebut = req.query.dateDebut;
+    if (req.query.dateFin) filters.dateFin = req.query.dateFin;
+    
     if (req.query.agenceId && ['admin', 'dga', 'adg', 'risques'].includes(req.user.role)) {
       filters.agenceId = req.query.agenceId;
     }
@@ -1253,14 +1395,20 @@ class DemandeForçageController {
 
     if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
       // Stats par agence
-      const statsAgence = await this.#DemandeForçage.aggregate([
+      const DemandeForçage = this.#getDemandeModel();
+      const statsAgence = await DemandeForçage.aggregate([
         {
           $group: {
             _id: '$agenceId',
             total: { $sum: 1 },
-            montantTotal: { $sum: '$montant' }
+            montantTotal: { $sum: '$montant' },
+            montantForçageTotal: { $sum: '$montantForçageTotal' },
+            validees: {
+              $sum: { $cond: [{ $in: ["$statut", ["APPROUVEE", "DECAISSEE"]] }, 1, 0] }
+            }
           }
-        }
+        },
+        { $sort: { _id: 1 } }
       ]);
 
       enrichies.parAgence = statsAgence;
@@ -1269,150 +1417,267 @@ class DemandeForçageController {
       if (stats.total > 0) {
         enrichies.tauxValidation = (stats.validees / stats.total) * 100;
         enrichies.tauxRefus = (stats.refusees / stats.total) * 100;
+        enrichies.tauxAttente = (stats.enAttente / stats.total) * 100;
       }
     }
 
     return enrichies;
   }
 
-  // ==================== NOTIFICATIONS (avec gestion d'erreur SSL) ====================
+  /**
+   * Obtenir le modèle DemandeForçage
+   */
+  #getDemandeModel() {
+    return require('../models/DemandeForçage');
+  }
+
+  // ==================== NOTIFICATIONS ====================
 
   async #notifierCreation(demande, user) {
     try {
-      if (NotificationService.create) {
-        await NotificationService.create({
-          utilisateur: user.id,
-          type: 'success',
-          titre: 'Demande créée',
-          message: `Votre demande #${demande.numeroReference} a été créée avec succès`,
-          entite: 'demande',
-          entiteId: demande._id,
-          lien: `/demandes/${demande._id}`,
-          lue: false,
-          metadata: {
-            demandeId: demande._id,
-            montant: demande.montant,
-            typeOperation: demande.typeOperation
-          }
-        });
-      }
+      // Utiliser l'ID du user connecté (qui est le client)
+      const clientId = user.id || user._id;
+      
+      console.log('📧 Envoi notification création:', {
+        clientId: clientId.toString(),
+        userId: user.id,
+        demandeRef: demande.numeroReference,
+        demandeId: demande._id.toString(),
+        userRole: user.role
+      });
+      
+      const result = await NotificationService.createNotification({
+        utilisateur: clientId,
+        titre: '✅ Demande créée',
+        message: `Votre demande ${demande.numeroReference} a été créée avec succès`,
+        entite: 'demande',
+        entiteId: demande._id,
+        type: 'success',
+        categorie: 'demande_creation',
+        priorite: 'normale',
+        lien: `/demandes/${demande._id}`,
+        metadata: {
+          demandeId: demande._id.toString(),
+          montant: demande.montant,
+          typeOperation: demande.typeOperation,
+          createdBy: user.id
+        },
+        tags: ['demande', 'creation']
+      });
+      
+      console.log('✅ Notification création envoyée:', result._id);
     } catch (error) {
-      console.warn('⚠️ Erreur notification création (non bloquante):', error.message);
+      console.error('❌ Erreur notification création:', error.message);
     }
   }
 
   async #notifierSoumission(demande, user) {
     try {
-      if (NotificationService.create) {
-        await NotificationService.create({
-          utilisateur: user.id,
-          type: 'info',
-          titre: 'Demande soumise',
-          message: `Votre demande #${demande.numeroReference} a été soumise pour traitement`,
-          entite: 'demande',
-          entiteId: demande._id,
-          lien: `/demandes/${demande._id}`,
-          lue: false
-        });
-      }
+      // Utiliser l'ID du user connecté (qui est le client)
+      const clientId = user.id || user._id;
+      
+      console.log('📧 Envoi notification soumission:', {
+        clientId: clientId.toString(),
+        userId: user.id,
+        demandeRef: demande.numeroReference,
+        demandeId: demande._id.toString(),
+        userRole: user.role
+      });
+      
+      const result = await NotificationService.createNotification({
+        utilisateur: clientId,
+        titre: '📤 Demande soumise',
+        message: `Votre demande ${demande.numeroReference} a été soumise pour traitement`,
+        entite: 'demande',
+        entiteId: demande._id,
+        type: 'info',
+        categorie: 'demande_soumission',
+        priorite: 'normale',
+        lien: `/demandes/${demande._id}`,
+        metadata: {
+          demandeId: demande._id.toString(),
+          statut: demande.statut,
+          submittedBy: user.id
+        },
+        tags: ['demande', 'soumission']
+      });
+      
+      console.log('✅ Notification soumission envoyée:', result._id);
     } catch (error) {
-      console.warn('⚠️ Erreur notification soumission (non bloquante):', error.message);
+      console.error('❌ Erreur notification soumission:', error.message);
     }
   }
 
   async #notifierAnnulation(demande, user) {
     try {
-      if (NotificationService.create) {
-        await NotificationService.create({
-          utilisateur: user.id,
-          type: 'warning',
-          titre: 'Demande annulée',
-          message: `Votre demande #${demande.numeroReference} a été annulée`,
-          entite: 'demande',
-          entiteId: demande._id,
-          lien: `/demandes/${demande._id}`,
-          lue: false
-        });
-      }
+      const clientId = demande.clientId._id ? demande.clientId._id : demande.clientId;
+      
+      await NotificationService.createNotification({
+        utilisateur: clientId,
+        titre: '❌ Demande annulée',
+        message: `Votre demande ${demande.numeroReference} a été annulée`,
+        entite: 'demande',
+        entiteId: demande._id,
+        type: 'warning',
+        categorie: 'demande_annulation',
+        priorite: 'normale',
+        lien: `/demandes/${demande._id}`,
+        metadata: {
+          demandeId: demande._id,
+          statut: demande.statut
+        },
+        tags: ['demande', 'annulation']
+      });
     } catch (error) {
-      console.warn('⚠️ Erreur notification annulation (non bloquante):', error.message);
+      console.warn('⚠️ Erreur notification annulation:', error.message);
     }
   }
 
   async #notifierModification(demande, user) {
     try {
-      if (NotificationService.create) {
-        await NotificationService.create({
-          utilisateur: user.id,
-          type: 'info',
-          titre: 'Demande modifiée',
-          message: `Votre demande #${demande.numeroReference} a été mise à jour`,
-          entite: 'demande',
-          entiteId: demande._id,
-          lien: `/demandes/${demande._id}`,
-          lue: false
-        });
-      }
+      const clientId = demande.clientId._id ? demande.clientId._id : demande.clientId;
+      
+      await NotificationService.createNotification({
+        utilisateur: clientId,
+        titre: '✏️ Demande modifiée',
+        message: `Votre demande ${demande.numeroReference} a été mise à jour`,
+        entite: 'demande',
+        entiteId: demande._id,
+        type: 'info',
+        categorie: 'demande_modification',
+        priorite: 'normale',
+        lien: `/demandes/${demande._id}`,
+        metadata: {
+          demandeId: demande._id,
+          statut: demande.statut
+        },
+        tags: ['demande', 'modification']
+      });
     } catch (error) {
-      console.warn('⚠️ Erreur notification modification (non bloquante):', error.message);
+      console.warn('⚠️ Erreur notification modification:', error.message);
     }
   }
 
   async #notifierTraitement(demande, nouveauStatut, user) {
-    await this.#notifierChangementStatut(demande, nouveauStatut, user);
+    try {
+      const clientId = demande.clientId._id ? demande.clientId._id : demande.clientId;
+      
+      const statutMessages = {
+        'APPROUVEE': 'a été approuvée ✅',
+        'REJETEE': 'a été rejetée ❌',
+        'EN_COURS': 'est en cours de traitement 🔄',
+        'DECAISSEE': 'a été décaissée 💰',
+        'REGULARISEE': 'a été régularisée ✅'
+      };
+
+      const message = statutMessages[nouveauStatut] || `a changé de statut: ${nouveauStatut}`;
+      
+      console.log('📧 Envoi notification traitement:', {
+        clientId: clientId.toString(),
+        demandeRef: demande.numeroReference,
+        demandeId: demande._id,
+        nouveauStatut: nouveauStatut
+      });
+      
+      await NotificationService.createNotification({
+        utilisateur: clientId,
+        titre: `📋 Demande ${demande.numeroReference} - ${nouveauStatut}`,
+        message: `Votre demande ${message}`,
+        entite: 'demande',
+        entiteId: demande._id,
+        type: nouveauStatut === 'REJETEE' ? 'error' : 
+              nouveauStatut === 'APPROUVEE' ? 'success' : 'info',
+        categorie: 'demande_traitement',
+        priorite: 'normale',
+        lien: `/demandes/${demande._id}`,
+        metadata: {
+          demandeId: demande._id,
+          ancienStatut: demande.statut,
+          nouveauStatut: nouveauStatut,
+          traitePar: user.email
+        },
+        declencheur: user.id,
+        tags: ['demande', 'traitement', nouveauStatut]
+      });
+      
+      console.log('✅ Notification traitement envoyée');
+    } catch (error) {
+      console.warn('⚠️ Erreur notification traitement:', error.message);
+    }
   }
 
   async #notifierRegularisation(demande, user) {
     try {
-      if (NotificationService.create) {
-        await NotificationService.create({
-          utilisateur: demande.clientId,
-          type: 'success',
-          titre: 'Demande régularisée',
-          message: `Votre demande #${demande.numeroReference} a été régularisée`,
-          entite: 'demande',
-          entiteId: demande._id,
-          lien: `/demandes/${demande._id}`,
-          lue: false
-        });
-      }
+      const clientId = demande.clientId._id ? demande.clientId._id : demande.clientId;
+      
+      await NotificationService.createNotification({
+        utilisateur: clientId,
+        titre: '✅ Demande régularisée',
+        message: `Votre demande ${demande.numeroReference} a été régularisée`,
+        entite: 'demande',
+        entiteId: demande._id,
+        type: 'success',
+        categorie: 'demande_regularisation',
+        priorite: 'normale',
+        lien: `/demandes/${demande._id}`,
+        metadata: {
+          demandeId: demande._id,
+          statut: demande.statut,
+          dateRegularisation: demande.dateRegularisation
+        },
+        tags: ['demande', 'regularisation']
+      });
     } catch (error) {
-      console.warn('⚠️ Erreur notification régularisation (non bloquante):', error.message);
+      console.warn('⚠️ Erreur notification régularisation:', error.message);
     }
   }
 
-  async #notifierAssignationConseiller(demandeId, conseillerId) {
+  async #notifierAssignationConseiller(demandeId, conseiller) {
     try {
-      const demande = await this.#DemandeForçage.findById(demandeId);
-      if (!demande) return;
-
-      await this.#Notification.create({
-        utilisateur: conseillerId,
-        type: 'demande_assignee',
-        titre: 'Nouvelle demande assignée',
-        message: `Demande ${demande.numeroReference} assignée à vous`,
+      await NotificationService.createNotification({
+        utilisateur: conseiller._id,
+        titre: '📋 Nouvelle demande assignée',
+        message: `Une demande vous a été assignée`,
         entite: 'demande',
         entiteId: demandeId,
-        lue: false,
-        createdAt: new Date()
+        type: 'info',
+        categorie: 'demande_assignation',
+        priorite: 'normale',
+        lien: `/demandes/${demandeId}`,
+        metadata: {
+          demandeId: demandeId,
+          assignePar: 'system'
+        },
+        tags: ['demande', 'assignation']
       });
-
     } catch (error) {
-      console.warn('⚠️ Erreur notification assignation (non bloquante):', error.message);
+      console.warn('⚠️ Erreur notification assignation:', error.message);
     }
   }
 
   async #notifierChangementStatut(demande, nouveauStatut, user) {
     try {
-      // Logique de notification selon le changement de statut
-      // Cette fonction peut être développée selon vos besoins
-      console.log(`📧 Notification changement statut: ${demande.statut} -> ${nouveauStatut}`);
+      // Déléguer à #notifierTraitement pour éviter la duplication
+      await this.#notifierTraitement(demande, nouveauStatut, user);
     } catch (error) {
-      console.warn('⚠️ Erreur notification changement statut (non bloquante):', error.message);
+      console.warn('⚠️ Erreur notification changement statut:', error.message);
     }
   }
 }
 
-const demandeControllerInstance = new DemandeForçageController();
+// Créer une instance et binder les méthodes
+const controller = new DemandeForçageController();
 
-module.exports = demandeControllerInstance;
+// Exporter les méthodes bindées
+module.exports = {
+  creerDemande: controller.creerDemande.bind(controller),
+  listerDemandes: controller.listerDemandes.bind(controller),
+  getDemande: controller.getDemande.bind(controller),
+  soumettreDemande: controller.soumettreDemande.bind(controller),
+  annulerDemande: controller.annulerDemande.bind(controller),
+  mettreAJourDemande: controller.mettreAJourDemande.bind(controller),
+  traiterDemande: controller.traiterDemande.bind(controller),
+  remonterDemande: controller.remonterDemande.bind(controller),
+  regulariser: controller.regulariser.bind(controller),
+  getStatistiques: controller.getStatistiques.bind(controller)
+};

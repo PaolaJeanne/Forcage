@@ -306,6 +306,7 @@ const routesToLoad = [
   { path: './routes/auth.routes', name: 'Authentification', mount: '/api/v1/auth' },
   { path: './routes/demandeForçage.routes', name: 'Demandes', mount: '/api/v1/demandes' },
   { path: './routes/admin.routes', name: 'Administration', mount: '/api/v1/admin' },
+  { path: './routes/admin.users.routes', name: 'Admin Users', mount: '/api/v1/admin/users' },
   { path: './routes/notification.routes', name: 'Notifications', mount: '/api/v1/notifications' },
   { path: './routes/dashboard.routes', name: 'Dashboard', mount: '/api/v1/dashboard' },
   { path: './routes/workflow.routes', name: 'Workflow', mount: '/api/v1/workflow' },

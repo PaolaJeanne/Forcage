@@ -6,47 +6,68 @@ class NotificationController {
   /**
    * Récupérer les notifications
    */
-  static async getNotifications(req, res) {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array()
-        });
-      }
-
-      const {
-        page = 1,
-        limit = 50,
-        unreadOnly = false,
-        entite = null,
-        categorie = null,
-        priorite = null
-      } = req.query;
-
-      const result = await NotificationService.getUserNotifications(req.user.id, {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        unreadOnly: unreadOnly === 'true',
-        entite,
-        categorie,
-        priorite
-      });
-
-      res.json({
-        success: true,
-        data: result
-      });
-
-    } catch (error) {
-
-      res.status(500).json({
+// notification.controller.js - Fonction getNotifications corrigée
+static async getNotifications(req, res) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
         success: false,
-        message: 'Erreur lors de la récupération des notifications'
+        errors: errors.array()
       });
     }
+
+    // ✅ LOG POUR DÉBOGUER
+    console.log('🔍 Backend: req.user:', req.user);
+    console.log('🔍 Backend: req.user.id:', req.user.id);
+    console.log('🔍 Backend: req.user._id:', req.user._id);
+
+    const {
+      page = 1,
+      limit = 50,
+      unreadOnly = false,
+      entite = null,
+      categorie = null,
+      priorite = null
+    } = req.query;
+
+    console.log('🔍 Backend: Paramètres de recherche:', {
+      userId: req.user.id,
+      page,
+      limit,
+      unreadOnly,
+      entite,
+      categorie,
+      priorite
+    });
+
+    const result = await NotificationService.getUserNotifications(req.user.id, {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      unreadOnly: unreadOnly === 'true',
+      entite,
+      categorie,
+      priorite
+    });
+
+    console.log('✅ Backend: Résultat:', result);
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('❌ Backend: Erreur getNotifications:', error);
+    console.error('❌ Backend: Stack:', error.stack);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la récupération des notifications',
+      error: error.message // ✅ Retourner l'erreur pour déboguer
+    });
   }
+}
 
   /**
    * Récupérer le compteur de notifications non lues

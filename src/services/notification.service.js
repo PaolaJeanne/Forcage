@@ -29,6 +29,13 @@ class NotificationService {
         tags = []
       } = options;
 
+      console.log('🔔 NotificationService.createNotification appelé:', {
+        utilisateur: utilisateur?.toString?.() || utilisateur,
+        titre,
+        entite,
+        entiteId: entiteId?.toString?.() || entiteId
+      });
+
       // Validation
       if (!utilisateur || !titre || !message) {
         throw new Error('Paramètres requis manquants');
@@ -37,6 +44,7 @@ class NotificationService {
       // Vérifier l'utilisateur
       const userExists = await User.exists({ _id: utilisateur });
       if (!userExists) {
+        console.warn('⚠️ Utilisateur non trouvé:', utilisateur);
         throw new Error('Utilisateur non trouvé');
       }
 
@@ -68,15 +76,15 @@ class NotificationService {
         lueAt: null
       });
 
+      console.log('✅ Notification créée:', notification._id);
+
       // Envoyer en temps réel
       await this.sendRealTimeNotification(notification);
-
-
 
       return this.formatNotification(notification);
 
     } catch (error) {
-
+      console.error('❌ Erreur createNotification:', error.message);
       throw error;
     }
   }
@@ -358,6 +366,19 @@ class NotificationService {
   }
 
   /**
+   * Notifier mise à jour de demande
+   */
+  async notifyDemandeUpdated(demande) {
+    try {
+      // Ne pas envoyer de notification si c'est juste une mise à jour interne
+      // Les notifications spécifiques sont gérées par le controller
+      return null;
+    } catch (error) {
+      console.error('Error in notifyDemandeUpdated:', error);
+    }
+  }
+
+  /**
    * Notifier changement de statut de demande
    */
   async notifyDemandeStatusChanged(demande, previousStatus, changedBy) {
@@ -408,7 +429,7 @@ class NotificationService {
       return notifications;
 
     } catch (error) {
-
+      console.error('Error in notifyDemandeStatusChanged:', error);
     }
   }
 

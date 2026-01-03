@@ -17,6 +17,13 @@ router.put('/users/:userId/role', adminController.updateUserRole);
 router.put('/users/:userId/toggle-status', adminController.toggleUserStatus);
 router.delete('/users/:userId', adminController.deleteUser);
 
+// Gestion des clients (utilisateurs avec role='client')
+router.get('/clients', adminController.getAllClients);
+
+// Gestion des agences
+router.get('/agences', adminController.getAgences);
+router.get('/users/agencies', adminController.getAgences); // Alias pour compatibilité
+
 // Routes du scheduler
 router.use('/scheduler', schedulerRoutes);
 

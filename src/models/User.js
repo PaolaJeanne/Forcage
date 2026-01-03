@@ -73,6 +73,13 @@ const userSchema = new mongoose.Schema({
     required: function () { return ['conseiller', 'rm', 'dce'].includes(this.role); }
   },
 
+  // ============ RÉFÉRENCE À L'AGENCE (NOUVEAU) ============
+  agencyId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Agency',
+    required: function () { return ['conseiller', 'rm', 'dce', 'adg'].includes(this.role); }
+  },
+
   // Classification client (si role = client)
   classification: {
     type: String,
@@ -144,6 +151,8 @@ const userSchema = new mongoose.Schema({
 // ============================================
 userSchema.index({ email: 1 }, { unique: true }); // Index unique sur email
 userSchema.index({ role: 1, agence: 1 }); // Recherche par rôle et agence
+userSchema.index({ role: 1, agencyId: 1 }); // Recherche par rôle et agencyId (NOUVEAU)
+userSchema.index({ agencyId: 1 }); // Recherche par agencyId (NOUVEAU)
 userSchema.index({ numeroCompte: 1 }, { unique: true, sparse: true }); // Index unique sparse
 userSchema.index({ isActive: 1 }); // Recherche par statut actif
 userSchema.index({ createdAt: -1 }); // Tri par date de création

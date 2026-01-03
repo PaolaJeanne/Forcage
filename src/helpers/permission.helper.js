@@ -88,14 +88,16 @@ class PermissionHelper {
     if (user.role === 'conseiller') {
       const conseillerId = demande.conseillerId?._id || demande.conseillerId;
       const isAssigned = conseillerId?.toString() === user.id.toString();
-      const sameAgency = demande.agenceId === user.agence;
+      // ✅ CORRIGÉ: Comparer agencyId (ObjectId) avec agencyId (ObjectId)
+      const sameAgency = demande.agencyId?.toString() === user.agencyId?.toString();
 
       return isAssigned || sameAgency;
     }
 
     // RM, DCE, ADG : leur agence
     if (this.hasPermission(user.role, 'VIEW_AGENCY_DEMANDES')) {
-      const sameAgency = demande.agenceId === user.agence;
+      // ✅ CORRIGÉ: Comparer agencyId (ObjectId) avec agencyId (ObjectId)
+      const sameAgency = demande.agencyId?.toString() === user.agencyId?.toString();
       return sameAgency;
     }
 
@@ -129,15 +131,18 @@ class PermissionHelper {
     if (this.hasPermission(user.role, 'VIEW_ALL_DEMANDES')) {
       // Pas de filtre supplémentaire
     } else if (this.hasPermission(user.role, 'VIEW_AGENCY_DEMANDES')) {
-      query.agenceId = user.agence;
+      // ✅ CORRIGÉ: Utiliser agencyId au lieu de agence
+      query.agencyId = user.agencyId;
     } else if (this.hasPermission(user.role, 'VIEW_TEAM_DEMANDES')) {
       if (user.role === 'conseiller') {
         query.$or = [
           { conseillerId: user.id },
-          { agenceId: user.agence }
+          // ✅ CORRIGÉ: Utiliser agencyId au lieu de agence
+          { agencyId: user.agencyId }
         ];
       } else {
-        query.agenceId = user.agence;
+        // ✅ CORRIGÉ: Utiliser agencyId au lieu de agence
+        query.agencyId = user.agencyId;
       }
     } else if (this.hasPermission(user.role, 'VIEW_OWN_DEMANDE')) {
       query.clientId = user.id;
