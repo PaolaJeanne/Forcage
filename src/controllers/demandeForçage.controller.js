@@ -86,10 +86,10 @@ class DemandeForçageController {
         typeOperation,
         montantForçageTotal,
         piecesJustificatives,
-        dateEcheance,
+        dateEcheance: dureeExhaustive, // ✅ CORRIGÉ: Utiliser dureeExhaustive pour dateEcheance
         dureeExhaustive,
         tauxInteret,
-        garanties,
+        garanties: garanties || [], // ✅ CORRIGÉ: S'assurer que c'est un tableau
         observations,
         motifDerogation,
         compteDebit,
@@ -107,12 +107,12 @@ class DemandeForçageController {
       });
 
       // Créer demande
-      const DemandeForçage = this.#getDemandeModel();
-      const nouvelleDemande = await DemandeForçage.create(demandeData);
+      const DemandeForçageModel = this.#getDemandeModel(); // ✅ CORRIGÉ: Renommer pour éviter confusion
+      const nouvelleDemande = await DemandeForçageModel.create(demandeData);
       
       // Peupler les informations client
-      const demandePopulee = await DemandeForçage.findById(nouvelleDemande._id)
-        .populate('clientId', 'nom prenom email telephone')
+      const demandePopulee = await DemandeForçageModel.findById(nouvelleDemande._id)
+        .populate('clientId', 'nom prenom email telephone cni')
         .populate('conseillerId', 'nom prenom email');
 
       console.log('✅ Demande créée avec ID:', demandePopulee._id);
@@ -173,13 +173,20 @@ class DemandeForçageController {
       
       // Message d'erreur plus détaillé
       let errorMessage = 'Erreur lors de la création de la demande';
-      if (error.message) {
+      let errorDetails = {};
+      
+      if (process.env.NODE_ENV === 'development') {
         errorMessage = error.message;
+        errorDetails = { stack: error.stack };
+      } else {
+        errorDetails = { 
+          errorId: Date.now().toString(36), 
+          timestamp: new Date().toISOString() 
+        };
+        console.error(`[Error ${errorDetails.errorId}]`, error.message);
       }
       
-      return errorResponse(res, 500, errorMessage, {
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
+      return errorResponse(res, 500, errorMessage, errorDetails);
     }
   }
 
@@ -319,9 +326,11 @@ class DemandeForçageController {
       const { id } = req.params;
       const { commentaire } = req.body || {};
 
-      // Récupérer demande
-      const DemandeForçage = this.#getDemandeModel();
-      const demande = await DemandeForçage.findById(id);
+      // Récupérer demande AVEC POPULATE
+      const DemandeForçageModel = this.#getDemandeModel();
+      const demande = await DemandeForçageModel.findById(id)
+        .populate('clientId', 'nom prenom email cni')
+        .populate('conseillerId', 'nom prenom email');
       
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
@@ -359,8 +368,8 @@ class DemandeForçageController {
       );
 
       // Peupler les informations
-      const demandePopulee = await DemandeForçage.findById(updated._id)
-        .populate('clientId', 'nom prenom email')
+      const demandePopulee = await DemandeForçageModel.findById(updated._id)
+        .populate('clientId', 'nom prenom email cni')
         .populate('conseillerId', 'nom prenom email');
 
       // Assigner conseiller si nécessaire
@@ -420,8 +429,9 @@ class DemandeForçageController {
       const { id } = req.params;
       const { commentaire } = req.body || {};
 
-      const DemandeForçage = this.#getDemandeModel();
-      const demande = await DemandeForçage.findById(id);
+      const DemandeForçageModel = this.#getDemandeModel();
+      const demande = await DemandeForçageModel.findById(id)
+        .populate('clientId', 'nom prenom email cni');
 
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
@@ -456,8 +466,8 @@ class DemandeForçageController {
       );
 
       // Peupler les informations
-      const demandePopulee = await DemandeForçage.findById(updated._id)
-        .populate('clientId', 'nom prenom email');
+      const demandePopulee = await DemandeForçageModel.findById(updated._id)
+        .populate('clientId', 'nom prenom email cni');
 
       // Notification
       try {
@@ -498,9 +508,9 @@ class DemandeForçageController {
       }
 
       // Récupérer demande
-      const DemandeForçage = this.#getDemandeModel();
-      const demande = await DemandeForçage.findById(id)
-        .populate('clientId', 'email nom prenom')
+      const DemandeForçageModel = this.#getDemandeModel();
+      const demande = await DemandeForçageModel.findById(id)
+        .populate('clientId', 'email nom prenom cni')
         .populate('conseillerId', 'email nom prenom');
 
       if (!demande) {
@@ -569,8 +579,8 @@ class DemandeForçageController {
       );
 
       // Peupler les informations
-      const demandePopulee = await DemandeForçage.findById(updated._id)
-        .populate('clientId', 'email nom prenom')
+      const demandePopulee = await DemandeForçageModel.findById(updated._id)
+        .populate('clientId', 'email nom prenom cni')
         .populate('conseillerId', 'email nom prenom');
 
       // Notification
@@ -631,8 +641,9 @@ class DemandeForçageController {
       const { commentaire } = req.body;
 
       // Récupérer demande
-      const DemandeForçage = this.#getDemandeModel();
-      const demande = await DemandeForçage.findById(id);
+      const DemandeForçageModel = this.#getDemandeModel();
+      const demande = await DemandeForçageModel.findById(id)
+        .populate('clientId', 'nom prenom email cni');
       
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
@@ -706,8 +717,9 @@ class DemandeForçageController {
       const { commentaire } = req.body;
 
       // Récupérer demande
-      const DemandeForçage = this.#getDemandeModel();
-      const demande = await DemandeForçage.findById(id);
+      const DemandeForçageModel = this.#getDemandeModel();
+      const demande = await DemandeForçageModel.findById(id)
+        .populate('clientId', 'nom prenom email cni');
       
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
@@ -752,8 +764,8 @@ class DemandeForçageController {
       );
 
       // Peupler les informations
-      const demandePopulee = await DemandeForçage.findById(updated._id)
-        .populate('clientId', 'nom prenom email');
+      const demandePopulee = await DemandeForçageModel.findById(updated._id)
+        .populate('clientId', 'nom prenom email cni');
 
       // Notification
       try {
@@ -816,10 +828,10 @@ class DemandeForçageController {
         return errorResponse(res, 400, 'Données invalides', errors.array());
       }
 
-      const DemandeForçage = this.#getDemandeModel();
+      const DemandeForçageModel = this.#getDemandeModel();
       
       // Vérifier permissions
-      const demande = await DemandeForçage.findById(req.params.id)
+      const demande = await DemandeForçageModel.findById(req.params.id)
         .populate('clientId', '_id');
 
       if (!demande) {
@@ -835,11 +847,11 @@ class DemandeForçageController {
       }
 
       // Mettre à jour
-      const demandeMaj = await DemandeForçage.findOneAndUpdate(
+      const demandeMaj = await DemandeForçageModel.findOneAndUpdate(
         { _id: req.params.id },
         { $set: req.body },
         { new: true }
-      ).populate('clientId', 'nom prenom email');
+      ).populate('clientId', 'nom prenom email cni');
 
       // Notification
       try {
@@ -880,7 +892,12 @@ class DemandeForçageController {
     }
 
     if (!montant || isNaN(parseFloat(montant)) || parseFloat(montant) <= 0) {
-      return { valid: false, message: 'Montant invalide' };
+      return { valid: false, message: 'Montant invalide. Doit être un nombre positif' };
+    }
+
+    const montantNum = parseFloat(montant);
+    if (montantNum > 100000000) { // 100 millions FCFA maximum
+      return { valid: false, message: 'Montant trop élevé (max: 100.000.000 FCFA)' };
     }
 
     if (!typeOperation) {
@@ -984,7 +1001,7 @@ class DemandeForçageController {
       devise: devise || 'XAF',
       dureeExhaustive,
       tauxInteret,
-      garanties,
+      garanties: garanties || [],
       observations,
       motifDerogation,
       clientNom: client.nom,
@@ -1001,24 +1018,33 @@ class DemandeForçageController {
       }]
     };
 
-    // Champs optionnels
+    // Gestion de la date d'échéance améliorée
     if (dateEcheance) {
-      // dateEcheance contient le nombre de mois
-      const nombreMois = parseInt(dateEcheance);
-      
-      if (!isNaN(nombreMois) && nombreMois > 0) {
-        // Calculer la date d'échéance: aujourd'hui + nombre de mois
+      // Vérifier si c'est un nombre (mois) ou une date ISO
+      if (!isNaN(dateEcheance) && parseInt(dateEcheance) > 0) {
+        // C'est un nombre de mois
+        const nombreMois = parseInt(dateEcheance);
         const today = new Date();
         const echeance = new Date(today.getFullYear(), today.getMonth() + nombreMois, today.getDate());
         demandeData.dateEcheance = echeance;
       } else {
-        // Si le nombre de mois est invalide, utiliser la date par défaut (J+15)
-        demandeData.dateEcheance = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+        // Essayer de parser comme date ISO
+        try {
+          const parsedDate = new Date(dateEcheance);
+          if (!isNaN(parsedDate.getTime())) {
+            demandeData.dateEcheance = parsedDate;
+          } else {
+            // Date par défaut: J+15
+            demandeData.dateEcheance = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+          }
+        } catch {
+          demandeData.dateEcheance = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+        }
       }
     } else {
-      // Date par défaut: J+15
       demandeData.dateEcheance = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
     }
+    
     if (compteDebit) demandeData.compteDebit = compteDebit;
     if (commentaireInterne) demandeData.commentaireInterne = commentaireInterne;
 
@@ -1030,13 +1056,15 @@ class DemandeForçageController {
    */
   async #genererReference() {
     try {
-      const DemandeForçage = this.#getDemandeModel();
+      const DemandeForçageModel = this.#getDemandeModel();
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
-      const prefix = `DF${year}${month}`;
+      const day = String(now.getDate()).padStart(2, '0');
+      const prefix = `DF${year}${month}${day}`;
 
-      const lastDemande = await DemandeForçage.findOne({
+      // Chercher la dernière référence du jour
+      const lastDemande = await DemandeForçageModel.findOne({
         numeroReference: new RegExp(`^${prefix}`)
       }).sort({ numeroReference: -1 });
 
@@ -1044,12 +1072,22 @@ class DemandeForçageController {
       if (lastDemande && lastDemande.numeroReference) {
         const lastSeq = parseInt(lastDemande.numeroReference.slice(-4)) || 0;
         sequence = lastSeq + 1;
+        
+        // Si on dépasse 9999, on ajoute un suffixe
+        if (sequence > 9999) {
+          const suffix = String.fromCharCode(65 + Math.floor((sequence - 10000) / 1000));
+          sequence = (sequence - 10000) % 1000;
+          return `${prefix}${suffix}${String(sequence).padStart(3, '0')}`;
+        }
       }
 
       return `${prefix}${String(sequence).padStart(4, '0')}`;
     } catch (error) {
       console.warn('⚠️ Erreur génération référence, utilisation fallback');
-      return `DF${Date.now().toString().slice(-8)}`;
+      // Fallback avec timestamp plus UUID court
+      const timestamp = Date.now().toString(36);
+      const random = Math.random().toString(36).substring(2, 6);
+      return `DF${timestamp}${random}`.toUpperCase();
     }
   }
 
@@ -1058,7 +1096,7 @@ class DemandeForçageController {
    */
   async #assignerConseillerAutomatique(demandeId, agence) {
     try {
-      const DemandeForçage = this.#getDemandeModel();
+      const DemandeForçageModel = this.#getDemandeModel();
       const conseiller = await User.findOne({
         role: 'conseiller',
         agence: agence || 'Agence Centrale',
@@ -1066,7 +1104,7 @@ class DemandeForçageController {
       }).select('_id email nom prenom');
 
       if (conseiller) {
-        await DemandeForçage.findByIdAndUpdate(demandeId, {
+        await DemandeForçageModel.findByIdAndUpdate(demandeId, {
           $set: { conseillerId: conseiller._id }
         });
 
@@ -1091,7 +1129,7 @@ class DemandeForçageController {
    * Mettre à jour statut demande
    */
   async #mettreAJourStatutDemande(demandeId, statutAvant, statutApres, action, userId, commentaire, updateData = {}) {
-    const DemandeForçage = this.#getDemandeModel();
+    const DemandeForçageModel = this.#getDemandeModel();
     const update = {
       $set: {
         statut: statutApres,
@@ -1110,7 +1148,7 @@ class DemandeForçageController {
       }
     };
 
-    return await DemandeForçage.findByIdAndUpdate(
+    return await DemandeForçageModel.findByIdAndUpdate(
       demandeId,
       update,
       { new: true }
@@ -1121,24 +1159,38 @@ class DemandeForçageController {
    * Construire filtres selon rôle
    */
   #construireFiltres(req) {
-    const { role, id: userId, agence } = req.user;
+    const { role, id: userId, agence, agencyId } = req.user;
     const { statut, priorite, dateDebut, dateFin } = req.query;
 
     const filters = {};
 
+    console.log('🔍 [FILTERS] Building filters for role:', role);
+    console.log('🔍 [FILTERS] User agence:', agence);
+    console.log('🔍 [FILTERS] User agencyId:', agencyId);
+
     switch (role) {
       case 'client':
         filters.clientId = userId;
+        console.log('🔍 [FILTERS] Client filter - clientId:', userId);
         break;
 
       case 'conseiller':
-        // Conseillers see all demandes in their agency
-        filters.agenceId = agence;
+        // ✅ CORRECTION: Filtrer par agence ET/OU conseiller assigné
+        filters.$or = [
+          { conseillerId: userId }, // Demandes assignées à ce conseiller
+          { 
+            agenceId: agence, 
+            conseillerId: null // Demandes non assignées dans cette agence
+          }
+        ];
+        console.log('🔍 [FILTERS] Conseiller filter:', filters.$or);
         break;
 
       case 'rm':
       case 'dce':
+        // ✅ CORRECTION: Utiliser agence (String) pour filtrer agenceId
         filters.agenceId = agence;
+        console.log('🔍 [FILTERS] RM/DCE filter - agenceId:', agence);
         break;
 
       case 'admin':
@@ -1146,6 +1198,7 @@ class DemandeForçageController {
       case 'risques':
       case 'adg':
         // Pas de filtre par défaut - voient tout
+        console.log('🔍 [FILTERS] Admin/DGA/Risques/ADG - no filter');
         break;
 
       default:
@@ -1196,15 +1249,18 @@ class DemandeForçageController {
       // Extraire les informations client
       let clientNomComplet = 'N/A';
       let clientEmail = 'N/A';
+      let clientCni = 'N/A';
       
       if (demande.clientId && typeof demande.clientId === 'object') {
         // Client est un objet populé
         clientNomComplet = `${demande.clientId.prenom || ''} ${demande.clientId.nom || ''}`.trim() || 'N/A';
         clientEmail = demande.clientId.email || 'N/A';
+        clientCni = demande.clientId.cni || 'N/A';
       } else if (demande.clientNom && demande.clientPrenom) {
         // Utiliser les champs stockés directement
         clientNomComplet = `${demande.clientPrenom} ${demande.clientNom}`.trim();
         clientEmail = demande.clientEmail || 'N/A';
+        // CNI n'est pas stocké directement, donc on garde 'N/A'
       }
 
       const base = {
@@ -1230,6 +1286,7 @@ class DemandeForçageController {
           nom: demande.clientId?.nom || demande.clientNom || 'N/A',
           prenom: demande.clientId?.prenom || demande.clientPrenom || 'N/A',
           email: clientEmail,
+          cni: clientCni, // ✅ AJOUTÉ
           agence: demande.agenceId
         };
 
@@ -1295,60 +1352,82 @@ class DemandeForçageController {
   /**
    * Formater réponse détaillée
    */
-  async #formaterReponseDemande(demande, user) {
-    const base = {
-      id: demande._id,
-      numeroReference: demande.numeroReference,
-      statut: demande.statut,
-      montant: demande.montant,
-      typeOperation: demande.typeOperation,
-      motif: demande.motif,
-      scoreRisque: demande.scoreRisque,
-      priorite: demande.priorite || 'NORMALE',
-      createdAt: demande.createdAt,
-      enRetard: demande.enRetard || false,
-      dateEcheance: demande.dateEcheance,
-      joursRestants: demande.dateEcheance ?
-        Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null,
-      clientNomComplet: demande.clientNomComplet || 
-        (demande.clientId ? `${demande.clientId.prenom} ${demande.clientId.nom}` : 
-        (demande.clientPrenom && demande.clientNom ? `${demande.clientPrenom} ${demande.clientNom}` : 'Client'))
-    };
+  // src/controllers/demandeForçage.controller.js - VERSION CORRIGÉE COMPLÈTE
 
-    // Infos client
-    base.client = {
-      id: demande.clientId._id ? demande.clientId._id : demande.clientId,
-      nom: demande.clientId.nom || demande.clientNom,
-      prenom: demande.clientId.prenom || demande.clientPrenom
-    };
+// Dans la méthode #formaterReponseDemande, remplacer par :
 
-    // Infos supplémentaires selon rôle
-    if (user.role !== 'client') {
-      base.client.email = demande.clientId.email || demande.clientEmail;
-      base.client.telephone = demande.clientId.telephone || demande.clientTelephone;
-      base.client.notationClient = demande.notationClient || 'C';
-      base.client.classification = demande.classification;
+async #formaterReponseDemande(demande, user) {
+  const base = {
+    id: demande._id,
+    numeroReference: demande.numeroReference,
+    statut: demande.statut,
+    montant: demande.montant,
+    typeOperation: demande.typeOperation,
+    motif: demande.motif,
+    scoreRisque: demande.scoreRisque,
+    priorite: demande.priorite || 'NORMALE',
+    createdAt: demande.createdAt,
+    updatedAt: demande.updatedAt,
+    enRetard: demande.enRetard || false,
+    dateEcheance: demande.dateEcheance,
+    joursRestants: demande.dateEcheance ?
+      Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null,
+    
+    // ✅ AJOUT DES CHAMPS MANQUANTS
+    dureeExhaustive: demande.dureeExhaustive,
+    tauxInteret: demande.tauxInteret,
+    garanties: demande.garanties || [],
+    observations: demande.observations,
+    motifDerogation: demande.motifDerogation,
+    compteNumero: demande.compteNumero,
+    compteDebit: demande.compteDebit,
+    devise: demande.devise || 'XAF',
+    
+    clientNomComplet: demande.clientNomComplet || 
+      (demande.clientId ? `${demande.clientId.prenom} ${demande.clientId.nom}` : 
+      (demande.clientPrenom && demande.clientNom ? `${demande.clientPrenom} ${demande.clientNom}` : 'Client'))
+  };
 
-      base.agenceId = demande.agenceId;
-      base.conseiller = demande.conseillerId;
-      base.montantAutorise = demande.montantAutorise;
-      base.commentaireTraitement = demande.commentaireTraitement;
-      base.piecesJustificatives = demande.piecesJustificatives;
+  // Infos client complètes
+  base.client = {
+    id: demande.clientId._id ? demande.clientId._id : demande.clientId,
+    nom: demande.clientId.nom || demande.clientNom || 'N/A',
+    prenom: demande.clientId.prenom || demande.clientPrenom || 'N/A',
+    email: demande.clientId.email || demande.clientEmail || 'N/A',
+    telephone: demande.clientId.telephone || demande.clientTelephone || 'N/A',
+    cni: demande.clientId?.cni || 'N/A', // ✅ AJOUTÉ
+    numeroCompte: demande.clientId?.numeroCompte || demande.compteNumero || 'N/A', // ✅ AJOUTÉ
+    agence: demande.clientId?.agence || demande.agenceId || 'N/A', // ✅ AJOUTÉ
+    nomComplet: demande.clientNomComplet || 
+      `${demande.clientId?.prenom || demande.clientPrenom || ''} ${demande.clientId?.nom || demande.clientNom || ''}`.trim()
+  };
 
-      if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
-        base.soldeActuel = demande.soldeActuel;
-        base.decouvertAutorise = demande.decouvertAutorise;
-        base.montantForçageTotal = demande.montantForçageTotal;
-        base.historique = demande.historique;
-        base.validePar_conseiller = demande.validePar_conseiller;
-        base.validePar_rm = demande.validePar_rm;
-        base.validePar_dce = demande.validePar_dce;
-        base.validePar_adg = demande.validePar_adg;
-      }
+  // Infos supplémentaires selon rôle
+  if (user.role !== 'client') {
+    base.client.notationClient = demande.notationClient || 'C';
+    base.client.classification = demande.classification;
+
+    base.agenceId = demande.agenceId;
+    base.conseiller = demande.conseillerId;
+    base.montantAutorise = demande.montantAutorise;
+    base.commentaireTraitement = demande.commentaireTraitement;
+    base.piecesJustificatives = demande.piecesJustificatives;
+    base.commentaireInterne = demande.commentaireInterne; // ✅ AJOUTÉ
+
+    if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
+      base.soldeActuel = demande.soldeActuel;
+      base.decouvertAutorise = demande.decouvertAutorise;
+      base.montantForçageTotal = demande.montantForçageTotal;
+      base.historique = demande.historique;
+      base.validePar_conseiller = demande.validePar_conseiller;
+      base.validePar_rm = demande.validePar_rm;
+      base.validePar_dce = demande.validePar_dce;
+      base.validePar_adg = demande.validePar_adg;
     }
-
-    return base;
   }
+
+  return base;
+}
 
   /**
    * Vérifier si peut soumettre
@@ -1395,8 +1474,8 @@ class DemandeForçageController {
 
     if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
       // Stats par agence
-      const DemandeForçage = this.#getDemandeModel();
-      const statsAgence = await DemandeForçage.aggregate([
+      const DemandeForçageModel = this.#getDemandeModel();
+      const statsAgence = await DemandeForçageModel.aggregate([
         {
           $group: {
             _id: '$agenceId',

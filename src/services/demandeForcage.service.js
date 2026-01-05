@@ -1,4 +1,4 @@
-// src/services/demandeForçage.service.js - SERVICE COMPLET
+// src/services/demandeForcage.service.js - VERSION FINALE COMPLÈTE
 const DemandeForçage = require('../models/DemandeForçage');
 const User = require('../models/User');
 const {
@@ -15,18 +15,13 @@ class DemandeForçageService {
   // ==================== CRÉATION ====================
   static async creerDemande(clientId, demandeData) {
     try {
-
-
-      // Vérifier que le client existe
       const client = await User.findById(clientId);
       if (!client) {
         throw new Error('Client introuvable');
       }
 
-      // Générer le numéro de référence
       const numeroReference = await DemandeForçage.generateNextReference();
 
-      // Créer la demande
       const demande = new DemandeForçage({
         ...demandeData,
         numeroReference,
@@ -36,11 +31,9 @@ class DemandeForçageService {
 
       await demande.save();
 
-
       return demande;
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -57,7 +50,6 @@ class DemandeForçageService {
       logger.debug('Filters:', filters);
       logger.debug('Options:', { page, limit, sort, skip });
 
-      // Construire la query
       let query = {};
 
       // Appliquer les filtres
@@ -70,7 +62,6 @@ class DemandeForçageService {
       if (filters.priorite) query.priorite = filters.priorite;
       if (filters.createdAt) query.createdAt = filters.createdAt;
 
-      // Recherche par motif
       if (filters.search) {
         query.$or = [
           { numeroReference: { $regex: filters.search, $options: 'i' } },
@@ -82,10 +73,9 @@ class DemandeForçageService {
 
       logger.database('FIND', 'DemandeForçage', query);
 
-      // Exécuter la requête
       const [demandes, total] = await Promise.all([
         DemandeForçage.find(query)
-          .populate('clientId', 'nom prenom email notationClient classification')
+          .populate('clientId', 'nom prenom email notationClient classification cni numeroCompte agence')
           .populate('conseillerId', 'nom prenom email')
           .sort(sort)
           .skip(skip)
@@ -96,7 +86,6 @@ class DemandeForçageService {
 
       logger.success(`Found ${demandes.length} demandes`, { total, page, limit });
 
-      // Calculer la pagination
       const totalPages = Math.ceil(total / limit);
 
       logger.footer();
@@ -121,7 +110,7 @@ class DemandeForçageService {
     }
   }
 
-  // ==================== CONSULTATION ====================
+  // ==================== CONSULTATION - ✅ VERSION CORRIGÉE ====================
   static async getDemandeById(id) {
     try {
       const logger = require('../utils/logger.util').child('DEMANDE_SERVICE');
@@ -134,9 +123,16 @@ class DemandeForçageService {
 
       logger.database('FIND', 'DemandeForçage', { _id: id });
 
+      // ✅ CORRECTION: Population complète avec tous les champs nécessaires
       const demande = await DemandeForçage.findById(id)
-        .populate('clientId', 'nom prenom email telephone notationClient classification')
+        .populate('clientId', 'nom prenom email telephone cni numeroCompte agence notationClient classification')
         .populate('conseillerId', 'nom prenom email telephone')
+        .populate('assignedTo', 'nom prenom email')
+        .populate('assignedBy', 'nom prenom email')
+        .populate('validePar_conseiller.userId', 'nom prenom email')
+        .populate('validePar_rm.userId', 'nom prenom email')
+        .populate('validePar_dce.userId', 'nom prenom email')
+        .populate('validePar_adg.userId', 'nom prenom email')
         .lean();
 
       if (!demande) {
@@ -144,7 +140,38 @@ class DemandeForçageService {
         throw new Error('Demande non trouvée');
       }
 
-      logger.success('Demande found', { ref: demande.numeroReference, id: demande._id });
+      // ✅ S'assurer que les infos client sont bien récupérées
+      if (demande.clientId && typeof demande.clientId === 'object') {
+        // Si le client est peuplé, copier les infos dans les champs directs pour compatibilité
+        demande.clientNom = demande.clientId.nom;
+        demande.clientPrenom = demande.clientId.prenom;
+        demande.clientEmail = demande.clientId.email;
+        demande.clientTelephone = demande.clientId.telephone;
+        demande.clientCni = demande.clientId.cni; // ✅ AJOUTÉ
+        demande.clientNumeroCompte = demande.clientId.numeroCompte; // ✅ AJOUTÉ
+        demande.clientAgence = demande.clientId.agence; // ✅ AJOUTÉ
+        
+        // ✅ Créer nomComplet si absent
+        if (!demande.clientNomComplet && demande.clientPrenom && demande.clientNom) {
+          demande.clientNomComplet = `${demande.clientPrenom} ${demande.clientNom}`;
+        }
+      }
+
+      // ✅ Calculer les jours restants
+      if (demande.dateEcheance) {
+        const now = new Date();
+        const echeance = new Date(demande.dateEcheance);
+        const diffTime = echeance - now;
+        demande.joursRestants = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        demande.enRetard = diffTime < 0;
+      }
+
+      logger.success('Demande found with full details', { 
+        ref: demande.numeroReference, 
+        id: demande._id,
+        hasClient: !!demande.clientId,
+        hasCni: !!demande.clientCni
+      });
 
       return demande;
 
@@ -158,24 +185,19 @@ class DemandeForçageService {
   // ==================== SOUMISSION ====================
   static async soumettreDemande(demandeId, userId) {
     try {
-
-
       const demande = await DemandeForçage.findById(demandeId);
       if (!demande) {
         throw new Error('Demande non trouvée');
       }
 
-      // Vérifier que c'est le propriétaire
       if (demande.clientId.toString() !== userId.toString()) {
         throw new Error('Seul le propriétaire peut soumettre la demande');
       }
 
-      // Vérifier le statut
       if (demande.statut !== STATUTS_DEMANDE.BROUILLON) {
         throw new Error(`La demande n'est plus en brouillon (statut: ${demande.statut})`);
       }
 
-      // Déterminer le prochain statut via WorkflowService
       const nouveauStatut = WorkflowService.getNextStatus(
         ACTIONS_DEMANDE.SOUMETTRE,
         demande.statut,
@@ -185,18 +207,15 @@ class DemandeForçageService {
         demande.agenceId
       );
 
-      // Mettre à jour
       demande.statut = nouveauStatut;
       demande.dateSoumission = new Date();
       demande.addHistoryEntry(ACTIONS_DEMANDE.SOUMETTRE, userId, 'Demande soumise');
 
       await demande.save();
 
-
       return demande;
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -221,7 +240,6 @@ class DemandeForçageService {
 
       logger.success('Demande found', { ref: demande.numeroReference });
 
-      // Vérifier que l'utilisateur peut traiter cette demande
       if (!demande.canBeProcessedBy({ id: userId, role: await this.getUserRole(userId) })) {
         logger.permission(false, `process_demande_${demandeId}`, { id: userId });
         logger.footer();
@@ -230,7 +248,6 @@ class DemandeForçageService {
 
       logger.permission(true, `process_demande_${demandeId}`, { id: userId });
 
-      // Vérifier les actions disponibles
       const userRole = await this.getUserRole(userId);
       const actionsDisponibles = demande.getAvailableActions({
         id: userId,
@@ -245,7 +262,6 @@ class DemandeForçageService {
         throw new Error(`Action "${action}" non autorisée`);
       }
 
-      // Vérifier les limites d'autorisation pour la validation
       if (action === ACTIONS_DEMANDE.VALIDER) {
         const montant = montantAutorise || demande.montant;
         const limite = LIMITES_AUTORISATION[userRole];
@@ -259,7 +275,6 @@ class DemandeForçageService {
         }
       }
 
-      // Déterminer le nouveau statut via WorkflowService
       const nouveauStatut = WorkflowService.getNextStatus(
         action,
         demande.statut,
@@ -271,18 +286,15 @@ class DemandeForçageService {
 
       logger.workflow(action, demande.statut, nouveauStatut, { montantAutorise, userRole });
 
-      // Mettre à jour la demande
       const updateData = {
         statut: nouveauStatut,
         updatedAt: new Date()
       };
 
-      // Ajouter des données spécifiques selon l'action
       if (action === ACTIONS_DEMANDE.VALIDER) {
         updateData.montantAutorise = montantAutorise || demande.montant;
         updateData.dateValidation = new Date();
 
-        // Enregistrer qui a validé
         if (['conseiller', 'rm', 'dce', 'adg'].includes(userRole)) {
           updateData[`validePar_${userRole}`] = {
             userId,
@@ -307,11 +319,9 @@ class DemandeForçageService {
         updateData.commentaireTraitement = commentaire;
       }
 
-      // Ajouter à l'historique
       demande.addHistoryEntry(action, userId, commentaire || `${action} par ${userRole}`);
       updateData.historique = demande.historique;
 
-      // Appliquer les mises à jour
       Object.assign(demande, updateData);
       await demande.save();
 
@@ -332,8 +342,6 @@ class DemandeForçageService {
   // ==================== REMONTÉE HIÉRARCHIQUE ====================
   static async remonterDemande(demandeId, userId, commentaire) {
     try {
-
-
       const demande = await DemandeForçage.findById(demandeId);
       if (!demande) {
         throw new Error('Demande non trouvée');
@@ -341,12 +349,10 @@ class DemandeForçageService {
 
       const userRole = await this.getUserRole(userId);
 
-      // Vérifier que l'utilisateur peut remonter
       if (!['conseiller', 'rm', 'dce'].includes(userRole)) {
         throw new Error('Vous ne pouvez pas remonter cette demande');
       }
 
-      // Déterminer le nouveau statut via WorkflowService
       const nouveauStatut = WorkflowService.getNextStatus(
         ACTIONS_DEMANDE.REMONTER,
         demande.statut,
@@ -356,17 +362,14 @@ class DemandeForçageService {
         demande.agenceId
       );
 
-      // Mettre à jour
       demande.statut = nouveauStatut;
       demande.addHistoryEntry(ACTIONS_DEMANDE.REMONTER, userId, commentaire || 'Remontée hiérarchique');
 
       await demande.save();
 
-
       return demande;
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -374,8 +377,6 @@ class DemandeForçageService {
   // ==================== ANNULATION ====================
   static async annulerDemande(demandeId, userId) {
     try {
-
-
       const demande = await DemandeForçage.findById(demandeId);
       if (!demande) {
         throw new Error('Demande non trouvée');
@@ -383,12 +384,10 @@ class DemandeForçageService {
 
       const userRole = await this.getUserRole(userId);
 
-      // Seul le client peut annuler, sauf admin
       if (demande.clientId.toString() !== userId.toString() && userRole !== 'admin') {
         throw new Error('Seul le client peut annuler sa demande');
       }
 
-      // Déterminer le nouveau statut
       const nouveauStatut = WorkflowService.getNextStatus(
         ACTIONS_DEMANDE.ANNULER,
         demande.statut,
@@ -398,18 +397,15 @@ class DemandeForçageService {
         demande.agenceId
       );
 
-      // Mettre à jour
       demande.statut = nouveauStatut;
       demande.dateAnnulation = new Date();
       demande.addHistoryEntry(ACTIONS_DEMANDE.ANNULER, userId, 'Demande annulée');
 
       await demande.save();
 
-
       return demande;
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -417,8 +413,6 @@ class DemandeForçageService {
   // ==================== RÉGULARISATION ====================
   static async regulariser(demandeId, userId) {
     try {
-
-
       const demande = await DemandeForçage.findById(demandeId);
       if (!demande) {
         throw new Error('Demande non trouvée');
@@ -426,17 +420,14 @@ class DemandeForçageService {
 
       const userRole = await this.getUserRole(userId);
 
-      // Vérifier les permissions
       if (!['conseiller', 'rm', 'dce', 'adg', 'admin', 'risques'].includes(userRole)) {
         throw new Error('Vous n\'avez pas les droits pour régulariser');
       }
 
-      // Seules les demandes validées peuvent être régularisées
       if (demande.statut !== STATUTS_DEMANDE.APPROUVEE) {
         throw new Error('Seules les demandes validées peuvent être régularisées');
       }
 
-      // Déterminer le nouveau statut
       const nouveauStatut = WorkflowService.getNextStatus(
         ACTIONS_DEMANDE.REGULARISER,
         demande.statut,
@@ -446,7 +437,6 @@ class DemandeForçageService {
         demande.agenceId
       );
 
-      // Mettre à jour
       demande.statut = nouveauStatut;
       demande.regularisee = true;
       demande.dateRegularisation = new Date();
@@ -454,11 +444,9 @@ class DemandeForçageService {
 
       await demande.save();
 
-
       return demande;
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -466,14 +454,11 @@ class DemandeForçageService {
   // ==================== MISE À JOUR ====================
   static async mettreAJourDemande(demandeId, updateData, userId) {
     try {
-
-
       const demande = await DemandeForçage.findById(demandeId);
       if (!demande) {
         throw new Error('Demande non trouvée');
       }
 
-      // Vérifier les permissions
       const userRole = await this.getUserRole(userId);
       const isOwner = demande.clientId.toString() === userId.toString();
 
@@ -481,22 +466,18 @@ class DemandeForçageService {
         throw new Error('Seul le propriétaire ou un admin peut modifier');
       }
 
-      // Vérifier que c'est un brouillon
       if (demande.statut !== STATUTS_DEMANDE.BROUILLON) {
         throw new Error('Seules les demandes brouillon peuvent être modifiées');
       }
 
-      // Mettre à jour
       Object.assign(demande, updateData);
       demande.addHistoryEntry('MODIFICATION', userId, 'Demande modifiée');
 
       await demande.save();
 
-
       return demande;
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -504,11 +485,8 @@ class DemandeForçageService {
   // ==================== STATISTIQUES ====================
   static async getStatistiques(filters = {}) {
     try {
-
-
       const match = {};
 
-      // Appliquer les filtres
       if (filters.clientId) match.clientId = new mongoose.Types.ObjectId(filters.clientId);
       if (filters.agenceId) match.agenceId = filters.agenceId;
       if (filters.dateDebut) match.createdAt = { $gte: new Date(filters.dateDebut) };
@@ -517,7 +495,6 @@ class DemandeForçageService {
         match.createdAt.$lte = new Date(filters.dateFin);
       }
 
-      // Agrégations principales
       const stats = await DemandeForçage.aggregate([
         { $match: match },
         {
@@ -562,7 +539,6 @@ class DemandeForçageService {
         }
       ]);
 
-      // Statistiques par statut
       const statsByStatus = await DemandeForçage.aggregate([
         { $match: match },
         {
@@ -575,7 +551,6 @@ class DemandeForçageService {
         { $sort: { count: -1 } }
       ]);
 
-      // Statistiques par agence
       const statsByAgence = await DemandeForçage.aggregate([
         { $match: { ...match, agenceId: { $exists: true, $ne: null } } },
         {
@@ -603,7 +578,6 @@ class DemandeForçageService {
         { $sort: { count: -1 } }
       ]);
 
-      // Calculer les taux
       const baseStats = stats[0] || {
         total: 0,
         totalMontant: 0,
@@ -626,11 +600,9 @@ class DemandeForçageService {
         tauxRetard: baseStats.enCours > 0 ? (baseStats.enRetard / baseStats.enCours) * 100 : 0
       };
 
-
       return result;
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -638,46 +610,35 @@ class DemandeForçageService {
   // ==================== ASSIGNATION AUTOMATIQUE ====================
   static async assignerConseillerAutomatique(demandeId) {
     try {
-
-
       const demande = await DemandeForçage.findById(demandeId);
       if (!demande) {
         throw new Error('Demande non trouvée');
       }
 
-      // Si déjà assigné, ne rien faire
       if (demande.conseillerId) {
-
         return demande;
       }
 
-      // Trouver un conseiller disponible dans l'agence
-      // ✅ CORRIGÉ: Utiliser agencyId (ObjectId) au lieu de agence (String)
       const conseiller = await User.findOne({
         role: 'conseiller',
         agencyId: demande.agencyId,
         isActive: true
-      }).sort({ chargeTravail: 1 }); // Prendre le moins chargé
+      }).sort({ chargeTravail: 1 });
 
       if (!conseiller) {
-
         return demande;
       }
 
-      // Assigner le conseiller
       demande.conseillerId = conseiller._id;
       await demande.save();
 
-      // Mettre à jour la charge de travail du conseiller
       await User.findByIdAndUpdate(conseiller._id, {
         $inc: { chargeTravail: 1 }
       });
 
-
       return demande;
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -703,38 +664,31 @@ class DemandeForçageService {
       return true;
 
     } catch (error) {
-
       throw error;
     }
   }
 
   // ==================== FONCTIONS UTILITAIRES ====================
 
-  // Obtenir le rôle d'un utilisateur
   static async getUserRole(userId) {
     try {
       const user = await User.findById(userId).select('role');
       return user ? user.role : null;
     } catch (error) {
-
       return null;
     }
   }
 
-  // Obtenir les actions disponibles pour un rôle
   static getWorkflowDisponible(userRole, currentStatus = null) {
-    // Cette méthode est maintenue pour compatibilité
-    // Utilisez plutôt WorkflowService.getAvailableActions()
     if (currentStatus) {
       return WorkflowService.getAvailableActions(
         currentStatus,
         userRole,
-        null, // Pas de montant
-        'C'   // Notation par défaut
+        null,
+        'C'
       );
     }
 
-    // Toutes les actions possibles pour ce rôle
     const actions = [];
 
     switch (userRole) {
@@ -761,22 +715,18 @@ class DemandeForçageService {
     return actions;
   }
 
-  // Calculer le score de risque
   static calculerScoreRisque(client, montant, montantForçageTotal) {
     return WorkflowService.calculateRiskLevel(montant, client.notationClient || 'C');
   }
 
-  // Trouver les demandes en retard
   static async getDemandesEnRetard() {
     return DemandeForçage.findEnRetard();
   }
 
-  // Statistiques par période
   static async getStatsByPeriod(startDate, endDate, agenceId = null) {
     return DemandeForçage.getStatsByPeriod(startDate, endDate, agenceId);
   }
 
-  // Mettre à jour les retards
   static async updateRetards() {
     try {
       const demandes = await DemandeForçage.find({
@@ -790,15 +740,11 @@ class DemandeForçageService {
       for (const demande of demandes) {
         demande.enRetard = true;
         await demande.save();
-
-
       }
-
 
       return demandes.length;
 
     } catch (error) {
-
       return 0;
     }
   }

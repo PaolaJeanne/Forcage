@@ -1,391 +1,883 @@
-// admin.users.routes.js - CORRECTION DU CHARGEMENT
+// admin.users.routes.js - VERSION AMÉLIORÉE ET OPTIMISÉE
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
-const Agency = require('../models/Agency'); // CHANGER CETTE LIGNE
-const logger = require('../utils/logger');
+
+// Import des contrôleurs
+const {
+  createUser,
+  updateUserRole,
+  getAllUsers,
+  getAllClients,
+  toggleUserStatus,
+  getUserById,
+  deleteUser,
+  createAgency,
+  getAgences,
+  updateAgency,
+  getAgencyById,
+  assignUserToAgency,
+  deactivateAgency,
+  getAgencyStats,
+  getAgencyUsers
+} = require('../controllers/admin.controller');
 
 const { authenticate, authorize } = require('../middlewares/auth.middleware');
-const { successResponse, errorResponse } = require('../utils/response.util');
+const { ROLES } = require('../../constants/roles');
+const logger = require('../utils/logger');
 
-// Middleware pour vérifier que c'est un admin
-const requireAdmin = authorize('admin', 'dga');
+// ===============================
+// MIDDLEWARES SPÉCIFIQUES
+// ===============================
 
 /**
- * Lister toutes les agences avec stats
- * GET /api/v1/admin/users/agencies
+ * Middleware pour vérifier les rôles admin
  */
-router.get('/agencies', authenticate, async (req, res) => {
-  try {
-    logger.info('📊 GET /agencies - User:', req.user?.role);
-    
-    if (!req.user) {
-      logger.warn('⚠️ User not authenticated');
-      return res.status(401).json({ success: false, message: 'Non authentifié' });
-    }
+const requireAdmin = (req, res, next) => {
+  authorize(ROLES.ADMIN)(req, res, next);
+};
 
-    // Vérifier si le modèle Agency est chargé
-    if (!Agency) {
-      logger.error('❌ Agency model is not defined');
-      return res.status(503).json({
+/**
+ * Middleware pour vérifier les rôles autorisés pour la gestion des agences
+ */
+const requireAgencyManagement = (allowedRoles = [ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM, ROLES.DCE]) => {
+  return (req, res, next) => {
+    if (!req.user || !req.user.role) {
+      return res.status(401).json({
         success: false,
-        message: 'Service agences non disponible',
-        error: 'Agency model not loaded'
+        message: 'Utilisateur non authentifié'
       });
     }
 
-    logger.info(`📊 Agency model loaded successfully: ${typeof Agency}`);
-
-    const userRole = req.user.role;
-    let agencies = [];
-
-    logger.info(`📊 Fetching agencies for role: ${userRole}`);
-
-    // Pour les admins, récupérer toutes les agences actives
-    if (['admin', 'dga', 'adg'].includes(userRole)) {
-      logger.info('📊 Admin/DGA/ADG - fetching all active agencies');
-      
-      // Utiliser la méthode statique du modèle
-      agencies = await Agency.findActive();
-      
-      // Populate les conseillers pour avoir leurs détails
-      agencies = await Agency.find({ isActive: true })
-        .sort({ name: 1 })
-        .populate('conseillers.userId', 'nom prenom email role')
-        .populate('responsables.userId', 'nom prenom email role')
-        .lean();
-        
-    } else if (userRole === 'conseiller') {
-      logger.info(`📊 Conseiller - fetching agencies for user: ${req.user.id}`);
-      
-      // Utiliser la méthode statique pour trouver les agences du conseiller
-      agencies = await Agency.findByConseiller(req.user.id)
-        .populate('conseillers.userId', 'nom prenom email')
-        .lean();
-        
+    if (allowedRoles.includes(req.user.role)) {
+      next();
     } else {
-      logger.warn(`⚠️ Role ${userRole} not authorized to view agencies`);
+      return res.status(403).json({
+        success: false,
+        message: 'Accès non autorisé pour cette opération'
+      });
+    }
+  };
+};
+
+/**
+ * Middleware pour valider l'ID d'agence
+ */
+const validateAgencyId = (req, res, next) => {
+  const { agencyId } = req.params;
+  
+  if (!agencyId || !/^[0-9a-fA-F]{24}$/.test(agencyId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'ID d\'agence invalide'
+    });
+  }
+  
+  next();
+};
+
+/**
+ * Middleware pour valider l'ID utilisateur
+ */
+const validateUserId = (req, res, next) => {
+  const { userId } = req.params;
+  
+  if (!userId || !/^[0-9a-fA-F]{24}$/.test(userId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'ID utilisateur invalide'
+    });
+  }
+  
+  next();
+};
+
+// ===============================
+// ROUTES UTILISATEURS
+// ===============================
+
+/**
+ * @route   POST /api/v1/admin/users
+ * @desc    Créer un nouvel utilisateur
+ * @access  Admin uniquement
+ */
+router.post('/users', 
+  authenticate, 
+  requireAdmin,
+  async (req, res) => {
+    try {
+      logger.info(`Création utilisateur par admin ${req.user.id}`, { userData: req.body });
+      
+      // Validation supplémentaire des données
+      const { email, role } = req.body;
+      
+      if (!email || !role) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email et rôle sont obligatoires'
+        });
+      }
+
+      // Vérifier que le rôle est valide
+      const validRoles = Object.values(ROLES);
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({
+          success: false,
+          message: `Rôle invalide. Rôles valides: ${validRoles.join(', ')}`
+        });
+      }
+
+      // Créer l'utilisateur
+      const result = await createUser(req, res);
+      
+      if (result.success) {
+        logger.info(`Utilisateur créé avec succès: ${email}`, { userId: result.data.user._id });
+      }
+      
+    } catch (error) {
+      logger.error('Erreur création utilisateur:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la création de l\'utilisateur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/users
+ * @desc    Récupérer tous les utilisateurs avec pagination et filtres
+ * @access  Admin, DGA, ADG
+ */
+router.get('/users', 
+  authenticate, 
+  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG]),
+  async (req, res) => {
+    try {
+      const { 
+        page = 1, 
+        limit = 20, 
+        role, 
+        agence, 
+        isActive,
+        search 
+      } = req.query;
+      
+      logger.info('Récupération utilisateurs', { 
+        filters: { page, limit, role, agence, isActive, search },
+        requestedBy: req.user.id 
+      });
+      
+      const result = await getAllUsers(req, res);
+      
+      if (result.success) {
+        logger.info(`${result.data.total} utilisateurs récupérés`, {
+          page,
+          limit,
+          totalPages: result.data.totalPages
+        });
+      }
+      
+    } catch (error) {
+      logger.error('Erreur récupération utilisateurs:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des utilisateurs',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/clients
+ * @desc    Récupérer tous les clients avec filtres
+ * @access  Admin, DGA, ADG, RM, DCE
+ */
+router.get('/clients', 
+  authenticate, 
+  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM, ROLES.DCE]),
+  async (req, res) => {
+    try {
+      const { 
+        page = 1, 
+        limit = 20, 
+        agence, 
+        notation,
+        isActive,
+        search 
+      } = req.query;
+      
+      logger.info('Récupération clients', { 
+        filters: { page, limit, agence, notation, isActive, search },
+        requestedBy: req.user.id 
+      });
+      
+      const result = await getAllClients(req, res);
+      
+      if (result.success) {
+        logger.info(`${result.data.total} clients récupérés`, {
+          page,
+          limit,
+          totalPages: result.data.totalPages
+        });
+      }
+      
+    } catch (error) {
+      logger.error('Erreur récupération clients:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des clients',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/users/:userId
+ * @desc    Récupérer un utilisateur spécifique
+ * @access  Admin, DGA, ADG, RM (seulement pour son agence)
+ */
+router.get('/users/:userId', 
+  authenticate, 
+  validateUserId,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      
+      logger.info('Récupération utilisateur', { 
+        userId,
+        requestedBy: req.user.id 
+      });
+      
+      // Vérifier les autorisations spécifiques
+      const User = require('../models/User');
+      const user = await User.findById(userId);
+      
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'Utilisateur non trouvé'
+        });
+      }
+      
+      // Vérifier si l'utilisateur a le droit de voir cet utilisateur
+      const userRole = req.user.role;
+      
+      // Admin et DGA peuvent voir tous les utilisateurs
+      if ([ROLES.ADMIN, ROLES.DGA].includes(userRole)) {
+        return await getUserById(req, res);
+      }
+      
+      // ADG peut voir tous les utilisateurs
+      if (userRole === ROLES.ADG) {
+        return await getUserById(req, res);
+      }
+      
+      // RM ne peut voir que les utilisateurs de son agence
+      if (userRole === ROLES.RM) {
+        if (user.agence === req.user.agence) {
+          return await getUserById(req, res);
+        } else {
+          return res.status(403).json({
+            success: false,
+            message: 'Accès non autorisé à cet utilisateur'
+          });
+        }
+      }
+      
+      // Pour les autres rôles, vérifier avec authorize
+      const allowedRoles = [ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM];
+      authorize(allowedRoles)(req, res, () => getUserById(req, res));
+      
+    } catch (error) {
+      logger.error('Erreur récupération utilisateur:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération de l\'utilisateur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   PUT /api/v1/admin/users/:userId/role
+ * @desc    Mettre à jour le rôle d'un utilisateur
+ * @access  Admin uniquement
+ */
+router.put('/users/:userId/role', 
+  authenticate, 
+  requireAdmin,
+  validateUserId,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { role } = req.body;
+      
+      logger.info('Mise à jour rôle utilisateur', { 
+        userId,
+        newRole: role,
+        updatedBy: req.user.id 
+      });
+      
+      // Validation du rôle
+      const validRoles = Object.values(ROLES);
+      if (!role || !validRoles.includes(role)) {
+        return res.status(400).json({
+          success: false,
+          message: `Rôle invalide. Rôles valides: ${validRoles.join(', ')}`
+        });
+      }
+      
+      const result = await updateUserRole(req, res);
+      
+      if (result.success) {
+        logger.info(`Rôle mis à jour pour l'utilisateur ${userId}: ${role}`);
+      }
+      
+    } catch (error) {
+      logger.error('Erreur mise à jour rôle:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la mise à jour du rôle',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   PUT /api/v1/admin/users/:userId/status
+ * @desc    Activer/désactiver un utilisateur
+ * @access  Admin, DGA
+ */
+router.put('/users/:userId/status', 
+  authenticate, 
+  authorize([ROLES.ADMIN, ROLES.DGA]),
+  validateUserId,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      
+      logger.info('Changement statut utilisateur', { 
+        userId,
+        updatedBy: req.user.id 
+      });
+      
+      const result = await toggleUserStatus(req, res);
+      
+      if (result.success) {
+        const status = result.data.user.isActive ? 'activé' : 'désactivé';
+        logger.info(`Utilisateur ${userId} ${status}`);
+      }
+      
+    } catch (error) {
+      logger.error('Erreur changement statut:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors du changement de statut',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   DELETE /api/v1/admin/users/:userId
+ * @desc    Supprimer (désactiver) un utilisateur
+ * @access  Admin uniquement
+ */
+router.delete('/users/:userId', 
+  authenticate, 
+  requireAdmin,
+  validateUserId,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      
+      logger.info('Suppression utilisateur', { 
+        userId,
+        deletedBy: req.user.id 
+      });
+      
+      // Empêcher la suppression d'un admin par un autre admin
+      if (userId === req.user.id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vous ne pouvez pas supprimer votre propre compte'
+        });
+      }
+      
+      const result = await deleteUser(req, res);
+      
+      if (result.success) {
+        logger.info(`Utilisateur ${userId} supprimé/désactivé`);
+      }
+      
+    } catch (error) {
+      logger.error('Erreur suppression utilisateur:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la suppression de l\'utilisateur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   PUT /api/v1/admin/users/:userId/assign-agency
+ * @desc    Assigner un utilisateur à une agence
+ * @access  Admin, DGA, ADG
+ */
+router.put('/users/:userId/assign-agency', 
+  authenticate, 
+  authorize([ROLES.ADMIN, ROLES.DGA, ROLES.ADG]),
+  validateUserId,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { agence, role = 'conseiller' } = req.body;
+      
+      logger.info('Assignation utilisateur à agence', { 
+        userId,
+        agence,
+        role,
+        assignedBy: req.user.id 
+      });
+      
+      if (!agence || agence.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Le nom de l\'agence est requis'
+        });
+      }
+
+      // Valider le rôle
+      const validAgencyRoles = ['conseiller', 'rm', 'dce', 'manager'];
+      if (!validAgencyRoles.includes(role)) {
+        return res.status(400).json({
+          success: false,
+          message: `Rôle invalide. Rôles autorisés: ${validAgencyRoles.join(', ')}`
+        });
+      }
+
+      const result = await assignUserToAgency(userId, agence.trim(), role, req.user.id);
+      
+      return res.status(result.success ? 200 : 400).json(result);
+      
+    } catch (error) {
+      logger.error('Erreur assignation agence:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de l\'assignation à l\'agence',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+// ===============================
+// ROUTES AGENCES
+// ===============================
+
+/**
+ * @route   POST /api/v1/admin/agences
+ * @desc    Créer une nouvelle agence
+ * @access  Admin, DGA
+ */
+router.post('/agences', 
+  authenticate, 
+  authorize([ROLES.ADMIN, ROLES.DGA]),
+  async (req, res) => {
+    try {
+      const { name, code, region, city, address } = req.body;
+      
+      logger.info('Création agence', { 
+        name,
+        code,
+        region,
+        createdBy: req.user.id 
+      });
+      
+      if (!name || !code) {
+        return res.status(400).json({
+          success: false,
+          message: 'Le nom et le code de l\'agence sont obligatoires'
+        });
+      }
+
+      const result = await createAgency(req, res);
+      
+      if (result.success) {
+        logger.info(`Agence créée: ${name} (${code})`);
+      }
+      
+    } catch (error) {
+      logger.error('Erreur création agence:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la création de l\'agence',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/agences
+ * @desc    Récupérer toutes les agences
+ * @access  Admin, DGA, ADG, RM, DCE
+ */
+router.get('/agences', 
+  authenticate, 
+  requireAgencyManagement(),
+  async (req, res) => {
+    try {
+      const { isActive, region, withStats } = req.query;
+      
+      logger.info('Récupération agences', { 
+        filters: { isActive, region, withStats },
+        requestedBy: req.user.id 
+      });
+      
+      const result = await getAgences(req, res);
+      
+      if (result.success) {
+        logger.info(`${result.data.total} agences récupérées`);
+      }
+      
+    } catch (error) {
+      logger.error('Erreur récupération agences:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des agences',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/agences/:agencyId
+ * @desc    Récupérer une agence spécifique
+ * @access  Admin, DGA, ADG, RM, DCE
+ */
+router.get('/agences/:agencyId', 
+  authenticate, 
+  requireAgencyManagement(),
+  validateAgencyId,
+  async (req, res) => {
+    try {
+      const { agencyId } = req.params;
+      const { withUsers, withStats } = req.query;
+      
+      logger.info('Récupération agence', { 
+        agencyId,
+        requestedBy: req.user.id 
+      });
+      
+      const result = await getAgencyById(req, res);
+      
+      if (result.success) {
+        logger.info(`Agence récupérée: ${result.data.agency.name}`);
+      }
+      
+    } catch (error) {
+      logger.error('Erreur récupération agence:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération de l\'agence',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   PUT /api/v1/admin/agences/:agencyId
+ * @desc    Mettre à jour une agence
+ * @access  Admin, DGA
+ */
+router.put('/agences/:agencyId', 
+  authenticate, 
+  authorize([ROLES.ADMIN, ROLES.DGA]),
+  validateAgencyId,
+  async (req, res) => {
+    try {
+      const { agencyId } = req.params;
+      
+      logger.info('Mise à jour agence', { 
+        agencyId,
+        updatedBy: req.user.id,
+        updates: req.body 
+      });
+      
+      const result = await updateAgency(req, res);
+      
+      if (result.success) {
+        logger.info(`Agence ${agencyId} mise à jour`);
+      }
+      
+    } catch (error) {
+      logger.error('Erreur mise à jour agence:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la mise à jour de l\'agence',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   DELETE /api/v1/admin/agences/:agencyId
+ * @desc    Désactiver une agence
+ * @access  Admin, DGA
+ */
+router.delete('/agences/:agencyId', 
+  authenticate, 
+  authorize([ROLES.ADMIN, ROLES.DGA]),
+  validateAgencyId,
+  async (req, res) => {
+    try {
+      const { agencyId } = req.params;
+      
+      logger.info('Désactivation agence', { 
+        agencyId,
+        deactivatedBy: req.user.id 
+      });
+      
+      // Vérifier si l'agence a des utilisateurs actifs
+      const User = require('../models/User');
+      const activeUsersCount = await User.countDocuments({
+        agence: { $exists: true },
+        isActive: true
+      });
+      
+      if (activeUsersCount > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Impossible de désactiver une agence avec des utilisateurs actifs',
+          data: { activeUsersCount }
+        });
+      }
+      
+      const result = await deactivateAgency(agencyId, req.user.id);
+      
+      return res.status(result.success ? 200 : 400).json(result);
+      
+    } catch (error) {
+      logger.error('Erreur désactivation agence:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la désactivation de l\'agence',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/agences/stats
+ * @desc    Récupérer les statistiques des agences
+ * @access  Admin, DGA, ADG
+ */
+router.get('/agences/stats', 
+  authenticate, 
+  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG]),
+  async (req, res) => {
+    try {
+      const { region, period } = req.query;
+      
+      logger.info('Récupération statistiques agences', { 
+        filters: { region, period },
+        requestedBy: req.user.id 
+      });
+      
+      const result = await getAgencyStats(region, period);
+      
+      return res.status(result.success ? 200 : 400).json(result);
+      
+    } catch (error) {
+      logger.error('Erreur récupération stats agences:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des statistiques',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/agences/:agencyId/users
+ * @desc    Lister tous les utilisateurs d'une agence
+ * @access  Admin, DGA, ADG, RM, DCE (RM/DCE seulement pour leur agence)
+ */
+router.get('/agences/:agencyId/users', 
+  authenticate, 
+  validateAgencyId,
+  async (req, res) => {
+    try {
+      const { agencyId } = req.params;
+      const { role, isActive, page = 1, limit = 20 } = req.query;
+      
+      logger.info('Récupération utilisateurs agence', { 
+        agencyId,
+        filters: { role, isActive, page, limit },
+        requestedBy: req.user.id 
+      });
+      
+      // Vérifier les autorisations spécifiques
+      const Agency = require('../models/Agency');
+      const agency = await Agency.findById(agencyId);
+      
+      if (!agency) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agence non trouvée'
+        });
+      }
+      
+      const userRole = req.user.role;
+      
+      // Admin, DGA, ADG peuvent voir toutes les agences
+      if ([ROLES.ADMIN, ROLES.DGA, ROLES.ADG].includes(userRole)) {
+        const result = await getAgencyUsers(agencyId, { role, isActive, page, limit });
+        return res.status(result.success ? 200 : 400).json(result);
+      }
+      
+      // RM et DCE ne peuvent voir que leur propre agence
+      if ([ROLES.RM, ROLES.DCE].includes(userRole)) {
+        // Vérifier si l'utilisateur appartient à cette agence
+        const User = require('../models/User');
+        const user = await User.findById(req.user.id);
+        
+        if (user && user.agence === agency.name) {
+          const result = await getAgencyUsers(agencyId, { role, isActive, page, limit });
+          return res.status(result.success ? 200 : 400).json(result);
+        } else {
+          return res.status(403).json({
+            success: false,
+            message: 'Accès non autorisé à cette agence'
+          });
+        }
+      }
+      
+      // Pour les autres rôles, refuser l'accès
       return res.status(403).json({
         success: false,
         message: 'Accès non autorisé'
       });
+      
+    } catch (error) {
+      logger.error('Erreur listage utilisateurs agence:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors du listage des utilisateurs',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
+  }
+);
 
-    // Formater la réponse
-    const formatted = agencies.map(agency => {
-      // Calculer les stats par rôle
-      const byRole = {};
+// ===============================
+// ROUTES SPÉCIALES
+// ===============================
+
+/**
+ * @route   GET /api/v1/admin/export/users
+ * @desc    Exporter la liste des utilisateurs
+ * @access  Admin, DGA
+ */
+router.get('/export/users', 
+  authenticate, 
+  authorize([ROLES.ADMIN, ROLES.DGA]),
+  async (req, res) => {
+    try {
+      const { format = 'csv', includeInactive = false } = req.query;
       
-      // Compter les conseillers
-      const conseillerCount = agency.conseillers?.length || 0;
-      if (conseillerCount > 0) {
-        byRole['conseiller'] = conseillerCount;
-      }
+      logger.info('Export utilisateurs', { 
+        format,
+        includeInactive,
+        requestedBy: req.user.id 
+      });
       
-      // Compter les responsables par type de rôle
-      if (agency.responsables && agency.responsables.length > 0) {
-        const roleCounts = {};
-        agency.responsables.forEach(resp => {
-          const role = resp.role || 'manager';
-          roleCounts[role] = (roleCounts[role] || 0) + 1;
-        });
+      // Implémenter la logique d'export selon le format
+      const result = await exportUsers(format, includeInactive === 'true');
+      
+      if (result.success) {
+        // Définir les en-têtes selon le format
+        if (format === 'csv') {
+          res.setHeader('Content-Type', 'text/csv');
+          res.setHeader('Content-Disposition', `attachment; filename=users_${Date.now()}.csv`);
+        } else if (format === 'excel') {
+          res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          res.setHeader('Content-Disposition', `attachment; filename=users_${Date.now()}.xlsx`);
+        }
         
-        Object.entries(roleCounts).forEach(([role, count]) => {
-          byRole[role] = count;
-        });
+        return res.send(result.data);
+      } else {
+        return res.status(400).json(result);
       }
-
-      return {
-        id: agency._id,
-        _id: agency._id,
-        name: agency.name,
-        description: agency.description || '',
-        region: agency.region || '',
-        city: agency.city || '',
-        address: agency.address || '',
-        phone: agency.phone || '',
-        email: agency.email || '',
-        isActive: agency.isActive,
-        totalUsers: (agency.conseillers?.length || 0) + (agency.responsables?.length || 0),
-        byRole: byRole,
-        totalConseillers: agency.conseillers?.length || 0,
-        totalResponsables: agency.responsables?.length || 0,
-        conseillers: agency.conseillers || [],
-        responsables: agency.responsables || [],
-        createdAt: agency.createdAt,
-        updatedAt: agency.updatedAt
-      };
-    });
-
-    logger.info(`✅ Found ${formatted.length} agencies for user ${req.user.id}`);
-    
-    return res.json({
-      success: true,
-      message: 'Agences récupérées avec succès',
-      data: {
-        total: formatted.length,
-        agencies: formatted
-      }
-    });
-
-  } catch (error) {
-    logger.error('❌ GET /agencies error:', error.message, error.stack);
-    return res.status(500).json({
-      success: false,
-      message: 'Erreur serveur lors de la récupération des agences',
-      error: error.message
-    });
-  }
-});
-
-/**
- * Créer une agence
- * POST /api/v1/admin/users/agencies
- */
-router.post('/agencies', authenticate, requireAdmin, async (req, res) => {
-  try {
-    logger.info('📊 POST /agencies - Body:', req.body);
-
-    const { 
-      name, 
-      description, 
-      region, 
-      city, 
-      address, 
-      phone, 
-      email 
-    } = req.body;
-
-    // Validation
-    if (!name || name.trim() === '') {
-      return errorResponse(res, 400, 'Le nom de l\'agence est requis');
-    }
-
-    // Vérifier si l'agence existe déjà
-    const existingAgency = await Agency.findOne({ 
-      name: name.trim() 
-    });
-
-    if (existingAgency) {
-      return errorResponse(res, 409, 'Une agence avec ce nom existe déjà');
-    }
-
-    // Créer l'agence
-    const agency = new Agency({
-      name: name.trim(),
-      description: description?.trim() || '',
-      region: region?.trim() || '',
-      city: city?.trim() || '',
-      address: address?.trim() || '',
-      phone: phone?.trim() || '',
-      email: email?.trim()?.toLowerCase() || '',
-      isActive: true
-    });
-
-    await agency.save();
-
-    logger.info(`✅ Agence créée: ${agency.name} (ID: ${agency._id})`);
-
-    return successResponse(res, 201, 'Agence créée avec succès', {
-      agency: {
-        id: agency._id,
-        name: agency.name,
-        description: agency.description,
-        region: agency.region,
-        city: agency.city,
-        isActive: agency.isActive
-      }
-    });
-
-  } catch (error) {
-    logger.error('❌ Erreur création agence:', error.message);
-    
-    if (error.name === 'ValidationError') {
-      return errorResponse(res, 400, 'Données invalides', error.message);
-    }
-    
-    if (error.code === 11000) {
-      return errorResponse(res, 409, 'Cette agence existe déjà');
-    }
-    
-    return errorResponse(res, 500, 'Erreur lors de la création de l\'agence', error.message);
-  }
-});
-
-/**
- * Assigner un utilisateur à une agence
- * PUT /api/v1/admin/users/:userId/assign-agency
- */
-router.put('/:userId/assign-agency', authenticate, requireAdmin, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { agence, role = 'conseiller' } = req.body;
-
-    if (!agence || agence.trim() === '') {
-      return errorResponse(res, 400, 'Le nom de l\'agence est requis');
-    }
-
-    logger.info(`📊 Assignation utilisateur ${userId} à l'agence: ${agence} (rôle: ${role})`);
-
-    // 1. Trouver l'agence
-    const agency = await Agency.findOne({ 
-      name: agence.trim(),
-      isActive: true 
-    });
-
-    if (!agency) {
-      return errorResponse(res, 404, 'Agence non trouvée');
-    }
-
-    // 2. Trouver l'utilisateur
-    const user = await User.findById(userId);
-    if (!user) {
-      return errorResponse(res, 404, 'Utilisateur non trouvé');
-    }
-
-    // 3. Retirer l'utilisateur de toute autre agence
-    await Agency.updateMany(
-      {
-        $or: [
-          { 'conseillers.userId': userId },
-          { 'responsables.userId': userId }
-        ]
-      },
-      {
-        $pull: {
-          conseillers: { userId: userId },
-          responsables: { userId: userId }
-        }
-      }
-    );
-
-    // 4. Ajouter l'utilisateur à la nouvelle agence
-    if (role === 'conseiller') {
-      agency.addConseiller(userId);
-    } else {
-      // Pour les rôles de responsables
-      if (!agency.responsables.find(r => r.userId.toString() === userId.toString())) {
-        agency.responsables.push({
-          userId: userId,
-          role: role
-        });
-      }
-    }
-
-    await agency.save();
-
-    // 5. Mettre à jour l'agence dans le profil utilisateur
-    user.agence = agency.name;
-    await user.save();
-
-    logger.info(`✅ Utilisateur ${user.email} assigné à l'agence ${agency.name} (rôle: ${role})`);
-
-    return successResponse(res, 200, 'Utilisateur assigné à l\'agence', {
-      user: {
-        id: user._id,
-        email: user.email,
-        nom: user.nom,
-        prenom: user.prenom,
-        role: user.role,
-        agence: user.agence
-      },
-      agency: {
-        id: agency._id,
-        name: agency.name,
-        totalConseillers: agency.conseillers.length,
-        totalResponsables: agency.responsables.length
-      }
-    });
-
-  } catch (error) {
-    logger.error('❌ Erreur assignation agence:', error.message);
-    return errorResponse(res, 500, 'Erreur lors de l\'assignation', error.message);
-  }
-});
-
-/**
- * Lister tous les utilisateurs d'une agence
- * GET /api/v1/admin/users/agency/:agence
- */
-router.get('/agency/:agence', authenticate, requireAdmin, async (req, res) => {
-  try {
-    const { agence } = req.params;
-    
-    if (!agence || agence.trim() === '') {
-      return errorResponse(res, 400, 'Nom d\'agence requis');
-    }
-
-    logger.info(`📊 Récupération utilisateurs pour l'agence: ${agence}`);
-
-    // Trouver l'agence
-    const agency = await Agency.findOne({ 
-      name: agence.trim(),
-      isActive: true 
-    })
-    .populate('conseillers.userId', 'nom prenom email role agence isActive')
-    .populate('responsables.userId', 'nom prenom email role agence isActive');
-
-    if (!agency) {
-      return errorResponse(res, 404, 'Agence non trouvée');
-    }
-
-    // Combiner conseillers et responsables
-    const allUsers = [];
-    
-    // Ajouter les conseillers
-    if (agency.conseillers && agency.conseillers.length > 0) {
-      agency.conseillers.forEach(cons => {
-        if (cons.userId) {
-          allUsers.push({
-            ...cons.userId.toObject(),
-            agenceRole: 'conseiller',
-            assignedAt: cons.assignedAt
-          });
-        }
+      
+    } catch (error) {
+      logger.error('Erreur export utilisateurs:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de l\'export des utilisateurs'
       });
     }
+  }
+);
 
-    // Ajouter les responsables
-    if (agency.responsables && agency.responsables.length > 0) {
-      agency.responsables.forEach(resp => {
-        if (resp.userId) {
-          allUsers.push({
-            ...resp.userId.toObject(),
-            agenceRole: resp.role || 'manager',
-            assignedAt: resp.assignedAt
-          });
-        }
+/**
+ * @route   POST /api/v1/admin/users/bulk
+ * @desc    Créer plusieurs utilisateurs en masse
+ * @access  Admin uniquement
+ */
+router.post('/users/bulk', 
+  authenticate, 
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { users } = req.body;
+      
+      if (!Array.isArray(users) || users.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Un tableau d\'utilisateurs est requis'
+        });
+      }
+      
+      if (users.length > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'Maximum 100 utilisateurs par import'
+        });
+      }
+      
+      logger.info('Import massif utilisateurs', { 
+        count: users.length,
+        importedBy: req.user.id 
+      });
+      
+      const result = await bulkCreateUsers(users, req.user.id);
+      
+      return res.status(result.success ? 201 : 400).json(result);
+      
+    } catch (error) {
+      logger.error('Erreur import massif utilisateurs:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de l\'import massif des utilisateurs',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
-
-    logger.info(`📊 ${allUsers.length} utilisateurs trouvés pour ${agence}`);
-    
-    return successResponse(res, 200, `Utilisateurs de ${agence}`, {
-      agency: {
-        id: agency._id,
-        name: agency.name,
-        totalUsers: allUsers.length
-      },
-      users: allUsers.map(user => ({
-        id: user._id,
-        _id: user._id,
-        email: user.email,
-        nom: user.nom,
-        prenom: user.prenom,
-        role: user.role,
-        agence: user.agence,
-        agenceRole: user.agenceRole,
-        isActive: user.isActive,
-        assignedAt: user.assignedAt,
-        lastLogin: user.lastLogin,
-        createdAt: user.createdAt
-      }))
-    });
-
-  } catch (error) {
-    logger.error('❌ Erreur listage utilisateurs:', error.message);
-    return errorResponse(res, 500, 'Erreur lors du listage', error.message);
   }
-});
+);
 
 module.exports = router;

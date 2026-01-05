@@ -1,4 +1,4 @@
-// src/controllers/auth.controller.js - VERSION CORRIGÉE
+// src/controllers/auth.controller.js - VERSION CORRIGÉE FINALE
 const User = require('../models/User');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt.util');
 const { successResponse, errorResponse } = require('../utils/response.util');
@@ -13,7 +13,6 @@ const getPermissionsForRole = (role) => {
     }
   }
   // Ajouter des permissions implicites ou frontend-specific si nécessaire
-  // Note: Si le frontend attend "demandes", on peut l'ajouter ici
   if (permissions.includes('VIEW_OWN_DEMANDE')) {
     permissions.push('demandes'); // Alias pour compatibilité frontend
     permissions.push('mesDemandes'); // Alias pour compatibilité frontend
@@ -57,7 +56,7 @@ const register = async (req, res) => {
       password,
       telephone,
       numeroCompte,
-      cni,
+      cni, // ✅ AJOUTÉ
       role: 'client',
       limiteAutorisation: 0,
       classification: 'normal',
@@ -76,7 +75,7 @@ const register = async (req, res) => {
         role: user.role,
         telephone: user.telephone,
         numeroCompte: user.numeroCompte,
-        cni: user.cni
+        cni: user.cni // ✅ AJOUTÉ
       }
     });
 
@@ -154,6 +153,7 @@ const login = async (req, res) => {
         limiteAutorisation: user.limiteAutorisation,
         telephone: user.telephone,
         numeroCompte: user.numeroCompte,
+        cni: user.cni, // ✅ AJOUTÉ
         classification: user.classification,
         notationClient: user.notationClient,
         kycValide: user.kycValide,
@@ -193,6 +193,7 @@ const getProfile = async (req, res) => {
         limiteAutorisation: user.limiteAutorisation,
         telephone: user.telephone,
         numeroCompte: user.numeroCompte,
+        cni: user.cni, // ✅ AJOUTÉ
         classification: user.classification,
         notationClient: user.notationClient,
         kycValide: user.kycValide,

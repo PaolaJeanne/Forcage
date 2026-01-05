@@ -77,7 +77,7 @@ const userSchema = new mongoose.Schema({
   agencyId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Agency',
-    required: function () { return ['conseiller', 'rm', 'dce', 'adg'].includes(this.role); }
+    required: false
   },
 
   // Classification client (si role = client)
