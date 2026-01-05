@@ -218,7 +218,7 @@ class SchedulerService {
                             entiteId: demande._id,
                             type: 'warning',
                             priorite: joursRestants === 1 ? 'urgente' : 'haute',
-                            categorie: 'echeance',
+                            categorie: 'alerte',
                             action: 'view',
                             lien: `/demandes/${demande._id}`,
                             metadata: {
@@ -243,7 +243,7 @@ class SchedulerService {
                             entiteId: demande._id,
                             type: 'warning',
                             priorite: 'normale',
-                            categorie: 'echeance',
+                            categorie: 'alerte',
                             action: 'view',
                             lien: `/demandes/${demande._id}`,
                             metadata: {
@@ -336,7 +336,7 @@ class SchedulerService {
                     entite: 'rapport',
                     type: 'info',
                     priorite: 'normale',
-                    categorie: 'statistiques',
+                    categorie: 'rapport',
                     action: 'view',
                     lien: '/admin/statistiques',
                     metadata: {
@@ -406,7 +406,7 @@ class SchedulerService {
                         entite: 'systeme',
                         type: 'warning',
                         priorite: 'haute',
-                        categorie: 'sante',
+                        categorie: 'system',
                         action: 'view',
                         lien: '/admin/monitoring',
                         metadata: {
@@ -458,7 +458,7 @@ class SchedulerService {
                     entite: 'systeme',
                     type: 'warning',
                     priorite: 'haute',
-                    categorie: 'retard',
+                    categorie: 'alerte',
                     action: 'view',
                     lien: '/admin/demandes/retard',
                     metadata: {

@@ -1,8 +1,10 @@
-// src/middlewares/checkRole.js - Version avec logs
+// src/middlewares/checkRole.js - Version améliorée avec logs
 console.log('[DEBUG] Chargement du middleware checkRole...');
 
+const { errorResponse } = require('../utils/response.util');
+
 const checkRole = (...allowedRoles) => {
-  console.log(`[DEBUG] checkRole appelé avec rôles: ${allowedRoles.join(', ')}`);
+  console.log(`[DEBUG] checkRole créé avec rôles: ${allowedRoles.join(', ')}`);
   
   return (req, res, next) => {
     console.log('[DEBUG] Middleware checkRole exécution:', {
@@ -13,7 +15,7 @@ const checkRole = (...allowedRoles) => {
     });
     
     // En mode développement, bypass temporairement
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV === 'development' && process.env.BYPASS_AUTH === 'true') {
       console.log('[DEBUG] Mode développement - bypass du checkRole');
       return next();
     }
@@ -25,21 +27,24 @@ const checkRole = (...allowedRoles) => {
     
     // Vérification basique
     if (!req.userRole) {
-      return res.status(401).json({
-        success: false,
-        message: 'Accès non autorisé. Utilisateur non authentifié.'
-      });
+      console.error('[DEBUG] checkRole: Utilisateur non authentifié');
+      return errorResponse(res, 401, 'Accès non autorisé. Utilisateur non authentifié.');
     }
     
     // Vérifier le rôle
     if (!allowedRoles.includes(req.userRole)) {
-      return res.status(403).json({
-        success: false,
+      console.error('[DEBUG] checkRole: Rôle non autorisé', {
+        role: req.userRole,
+        allowedRoles
+      });
+      return errorResponse(res, 403, {
         message: `Accès refusé. Rôle requis: ${allowedRoles.join(', ')}`,
-        yourRole: req.userRole
+        yourRole: req.userRole,
+        allowedRoles
       });
     }
     
+    console.log('[DEBUG] checkRole: Accès autorisé pour rôle', req.userRole);
     next();
   };
 };

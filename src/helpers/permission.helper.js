@@ -69,6 +69,7 @@ class PermissionHelper {
 
   /**
    * Vérifier si un utilisateur peut accéder à une demande
+   * VERSION CORRIGÉE avec support agencyId/agence
    */
   static canAccessDemande(user, demande) {
 
@@ -84,21 +85,32 @@ class PermissionHelper {
       return isOwner;
     }
 
-    // Conseiller : demandes assignées + agence
+    // Service risques : voir les demandes en analyse
+    if (user.role === 'risques') {
+      return demande.statut === 'EN_ANALYSE_RISQUES';
+    }
+
+    // Vérifier par agencyId d'abord (plus précis)
+    if (user.agencyId && demande.agencyId) {
+      const sameAgencyById = demande.agencyId.toString() === user.agencyId.toString();
+      if (sameAgencyById) {
+        return true;
+      }
+    }
+
+    // Fallback sur le nom de l'agence (pour compatibilité)
+    if (user.agence && demande.agence) {
+      const sameAgencyByName = demande.agence === user.agence;
+      if (sameAgencyByName) {
+        return true;
+      }
+    }
+
+    // Conseiller : demandes assignées
     if (user.role === 'conseiller') {
       const conseillerId = demande.conseillerId?._id || demande.conseillerId;
       const isAssigned = conseillerId?.toString() === user.id.toString();
-      // ✅ CORRIGÉ: Comparer agencyId (ObjectId) avec agencyId (ObjectId)
-      const sameAgency = demande.agencyId?.toString() === user.agencyId?.toString();
-
-      return isAssigned || sameAgency;
-    }
-
-    // RM, DCE, ADG : leur agence
-    if (this.hasPermission(user.role, 'VIEW_AGENCY_DEMANDES')) {
-      // ✅ CORRIGÉ: Comparer agencyId (ObjectId) avec agencyId (ObjectId)
-      const sameAgency = demande.agencyId?.toString() === user.agencyId?.toString();
-      return sameAgency;
+      return isAssigned;
     }
 
     return false;
@@ -123,31 +135,48 @@ class PermissionHelper {
 
   /**
    * Construire la query selon le rôle
+   * VERSION CORRIGÉE avec support agencyId/agence
    */
   static buildQueryForRole(user, filters = {}) {
     let query = {};
 
     // Selon les permissions
     if (this.hasPermission(user.role, 'VIEW_ALL_DEMANDES')) {
-      // Pas de filtre supplémentaire
+      // Pas de filtre supplémentaire pour admin/dga
     } else if (this.hasPermission(user.role, 'VIEW_AGENCY_DEMANDES')) {
-      // ✅ CORRIGÉ: Utiliser agencyId au lieu de agence
-      query.agencyId = user.agencyId;
+      // Utiliser agencyId si disponible, sinon agence
+      if (user.agencyId) {
+        query.agencyId = user.agencyId;
+      } else if (user.agence) {
+        query.agence = user.agence;
+      }
     } else if (this.hasPermission(user.role, 'VIEW_TEAM_DEMANDES')) {
       if (user.role === 'conseiller') {
         query.$or = [
           { conseillerId: user.id },
-          // ✅ CORRIGÉ: Utiliser agencyId au lieu de agence
-          { agencyId: user.agencyId }
+          // Agence du conseiller
+          { $and: [
+            { agence: user.agence },
+            { conseillerId: { $exists: false } } // Demandes non assignées
+          ]}
         ];
       } else {
-        // ✅ CORRIGÉ: Utiliser agencyId au lieu de agence
-        query.agencyId = user.agencyId;
+        // Utiliser agencyId si disponible, sinon agence
+        if (user.agencyId) {
+          query.agencyId = user.agencyId;
+        } else if (user.agence) {
+          query.agence = user.agence;
+        }
       }
     } else if (this.hasPermission(user.role, 'VIEW_OWN_DEMANDE')) {
       query.clientId = user.id;
     } else {
       return { _id: null }; // Retourner une query qui ne retournera rien
+    }
+
+    // Service risques : seulement les demandes en analyse
+    if (user.role === 'risques') {
+      query.statut = 'EN_ANALYSE_RISQUES';
     }
 
     // Appliquer les filtres additionnels
@@ -159,6 +188,12 @@ class PermissionHelper {
     }
     if (filters.scoreRisque) {
       query.scoreRisque = filters.scoreRisque;
+    }
+    if (filters.conseillerId) {
+      query.conseillerId = filters.conseillerId;
+    }
+    if (filters.clientId) {
+      query.clientId = filters.clientId;
     }
 
     if (filters.dateDebut || filters.dateFin) {
@@ -256,6 +291,56 @@ class PermissionHelper {
     }
 
     return 'dga';
+  }
+
+  /**
+   * Vérifier si l'utilisateur peut assigner une demande
+   */
+  static canAssignDemande(user, demande) {
+    // Seuls les conseillers, RM, DCE peuvent assigner
+    if (!['conseiller', 'rm', 'dce'].includes(user.role)) {
+      return false;
+    }
+
+    // Vérifier que la demande est dans la même agence
+    if (user.agencyId && demande.agencyId) {
+      return demande.agencyId.toString() === user.agencyId.toString();
+    }
+
+    // Fallback sur le nom de l'agence
+    if (user.agence && demande.agence) {
+      return demande.agence === user.agence;
+    }
+
+    return false;
+  }
+
+  /**
+   * Vérifier si l'utilisateur peut valider une demande selon son niveau hiérarchique
+   */
+  static canValidateDemande(user, demande) {
+    const userLevel = this.getHierarchyLevel(user.role);
+    
+    // Si c'est une demande à risque élevé, nécessite validation risques
+    if (demande.scoreRisque === 'ELEVE' || demande.scoreRisque === 'CRITIQUE') {
+      return user.role === 'risques';
+    }
+
+    // Selon le statut actuel
+    switch (demande.statut) {
+      case 'EN_ETUDE_CONSEILLER':
+        return user.role === 'conseiller';
+      case 'EN_ATTENTE_RM':
+        return user.role === 'rm';
+      case 'EN_ATTENTE_DCE':
+        return user.role === 'dce';
+      case 'EN_ATTENTE_ADG':
+        return user.role === 'adg';
+      case 'EN_ANALYSE_RISQUES':
+        return user.role === 'risques';
+      default:
+        return false;
+    }
   }
 }
 

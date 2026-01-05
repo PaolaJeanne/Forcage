@@ -1,6 +1,7 @@
 // middleware/auth.middleware.js - VERSION COMPLÈTE CORRIGÉE
 const { verifyToken, getUserFromToken } = require('../utils/jwt.util');
 const { errorResponse } = require('../utils/response.util');
+const PermissionHelper = require('../helpers/permission.helper');
 
 /**
  * Middleware d'authentification principal
@@ -30,7 +31,7 @@ const authenticate = async (req, res, next) => {
 
     const token = authHeader.substring(7);
     console.log('🔑 [AUTHENTICATE] Token extrait - Longueur:', token.length);
-    console.log('� [AUTeHENTICATE] Token (premiers 50 chars):', token.substring(0, 50) + '...');
+    console.log('🔑 [AUTHENTICATE] Token (premiers 50 chars):', token.substring(0, 50) + '...');
 
     if (!token || token === '') {
       console.error('❌ [AUTHENTICATE] ERREUR: Token vide');
@@ -50,6 +51,8 @@ const authenticate = async (req, res, next) => {
       id: user._id || user.id,
       email: user.email,
       role: user.role,
+      agence: user.agence,
+      agencyId: user.agencyId,
       isActive: user.isActive
     });
 
@@ -73,7 +76,9 @@ const authenticate = async (req, res, next) => {
       ...user,
       id: userId,           // Format standard
       _id: userId,          // Format MongoDB
-      userId: userId        // Format legacy
+      userId: userId,       // Format legacy
+      agencyId: user.agencyId || null, // Assurer agencyId est défini
+      agence: user.agence || null       // Assurer agence est défini
     };
     
     req.userId = userId;
@@ -106,7 +111,7 @@ const authenticate = async (req, res, next) => {
 const authorize = (...roles) => {
   return (req, res, next) => {
     console.log('\n' + '='.repeat(80));
-    console.log('� [AUToHORIZE] Vérification des rôles');
+    console.log('🔐 [AUTHORIZE] Vérification des rôles');
     console.log('📍 Route:', req.method, req.path);
     console.log('🔒 [AUTHORIZE] Rôles autorisés:', roles);
     console.log('👤 [AUTHORIZE] Rôle utilisateur:', req.userRole);
@@ -132,7 +137,8 @@ const authorize = (...roles) => {
     console.log('📊 Utilisateur autorisé:', {
       email: req.user.email,
       role: req.userRole,
-      agence: req.user.agence
+      agence: req.user.agence,
+      agencyId: req.user.agencyId
     });
     console.log('='.repeat(80) + '\n');
     next();
@@ -151,34 +157,14 @@ const canViewDemande = async (req, res, next) => {
       return errorResponse(res, 404, 'Demande introuvable');
     }
 
-    // Admins et rôles supérieurs voient tout
-    if (['admin', 'dga', 'adg', 'risques'].includes(req.user.role)) {
+    // Vérifier avec PermissionHelper
+    if (PermissionHelper.canAccessDemande(req.user, demande)) {
       req.demande = demande;
       return next();
     }
 
-    // Client: ne voit que ses propres demandes
-    if (req.user.role === 'client') {
-      if (demande.clientId.toString() === req.user.id) {
-        req.demande = demande;
-        return next();
-      }
-      return errorResponse(res, 403, 'Accès non autorisé');
-    }
+    return errorResponse(res, 403, 'Accès non autorisé à cette demande');
 
-    // Conseiller/RM/DCE: voient les demandes de leur agence
-    if (['conseiller', 'rm', 'dce'].includes(req.user.role)) {
-      const User = require('../models/User');
-      const client = await User.findById(demande.clientId);
-
-      if (client && client.agence === req.user.agence) {
-        req.demande = demande;
-        return next();
-      }
-      return errorResponse(res, 403, 'Demande hors de votre agence');
-    }
-
-    return errorResponse(res, 403, 'Accès non autorisé');
   } catch (error) {
     console.error('❌ canViewDemande:', error);
     return errorResponse(res, 500, 'Erreur de permission');
@@ -196,7 +182,7 @@ const canCreateDemande = (req, res, next) => {
 };
 
 /**
- * Middleware pour traiter une demande (conseillers et supérieurs)
+ * Middleware pour traiter une demande
  */
 const canProcessDemande = async (req, res, next) => {
   try {
@@ -207,22 +193,10 @@ const canProcessDemande = async (req, res, next) => {
       return errorResponse(res, 404, 'Demande introuvable');
     }
 
-    // Admins et rôles supérieurs peuvent tout traiter
-    if (['admin', 'dga', 'adg', 'risques'].includes(req.user.role)) {
+    // Vérifier avec PermissionHelper
+    if (PermissionHelper.canValidateDemande(req.user, demande)) {
       req.demande = demande;
       return next();
-    }
-
-    // Conseillers/RM/DCE peuvent traiter selon workflow
-    if (['conseiller', 'rm', 'dce'].includes(req.user.role)) {
-      const User = require('../models/User');
-      const client = await User.findById(demande.clientId);
-
-      if (client && client.agence === req.user.agence) {
-        req.demande = demande;
-        return next();
-      }
-      return errorResponse(res, 403, 'Demande hors de votre agence');
     }
 
     return errorResponse(res, 403, 'Vous n\'avez pas les droits pour traiter cette demande');
@@ -252,14 +226,32 @@ const requireNextLevel = async (req, res, next) => {
         }
         break;
 
-      case 'EN_ETUDE':
+      case 'EN_ETUDE_CONSEILLER':
         if (['rm', 'dce', 'adg', 'dga', 'admin', 'risques'].includes(req.user.role)) {
           return next();
         }
         break;
 
-      case 'EN_VALIDATION':
+      case 'EN_ATTENTE_RM':
         if (['dce', 'adg', 'dga', 'admin', 'risques'].includes(req.user.role)) {
+          return next();
+        }
+        break;
+
+      case 'EN_ATTENTE_DCE':
+        if (['adg', 'dga', 'admin', 'risques'].includes(req.user.role)) {
+          return next();
+        }
+        break;
+
+      case 'EN_ATTENTE_ADG':
+        if (['dga', 'admin', 'risques'].includes(req.user.role)) {
+          return next();
+        }
+        break;
+
+      case 'EN_ANALYSE_RISQUES':
+        if (['risques', 'adg', 'dga', 'admin'].includes(req.user.role)) {
           return next();
         }
         break;
@@ -343,13 +335,15 @@ const canAuthorize = (req, res, next) => {
 function checkAmountLimit(req, res, next, montant) {
   console.log('💰 checkAmountLimit: Montant:', montant);
   console.log('💰 checkAmountLimit: Limite utilisateur:', req.user.limiteAutorisation);
-
-  if (req.user.limiteAutorisation < montant && req.user.role !== 'admin') {
+  
+  // Vérifier avec PermissionHelper
+  if (!PermissionHelper.canAuthorizeMontant(req.user.role, montant)) {
     console.error('❌ checkAmountLimit: Limite dépassée');
+    const limite = require('../constants/roles').LIMITES_AUTORISATION[req.user.role] || 0;
     return errorResponse(
       res,
       403,
-      `Montant (${montant} FCFA) dépasse votre limite d'autorisation (${req.user.limiteAutorisation} FCFA)`
+      `Montant (${montant} FCFA) dépasse votre limite d'autorisation (${limite} FCFA)`
     );
   }
 
@@ -359,6 +353,7 @@ function checkAmountLimit(req, res, next, montant) {
 
 /**
  * Vérifier si l'utilisateur est dans la même agence
+ * VERSION CORRIGÉE avec support agencyId/agence
  */
 const sameAgency = async (req, res, next) => {
   try {
@@ -367,6 +362,7 @@ const sameAgency = async (req, res, next) => {
     console.log('📍 Route:', req.method, req.path);
     console.log('👤 [SAME_AGENCY] Rôle utilisateur:', req.user.role);
     console.log('🏢 [SAME_AGENCY] Agence utilisateur:', req.user.agence);
+    console.log('🏢 [SAME_AGENCY] AgencyId utilisateur:', req.user.agencyId);
 
     // Les rôles supérieurs ont accès à tout
     if (['admin', 'dga', 'risques'].includes(req.user.role)) {
@@ -375,12 +371,19 @@ const sameAgency = async (req, res, next) => {
       return next();
     }
 
-    const demandeId = req.params.id;
+    const demandeId = req.params.id || req.body.demandeId;
     console.log('📋 [SAME_AGENCY] Demande ID:', demandeId);
+    
+    if (!demandeId) {
+      console.error('❌ [SAME_AGENCY] ERREUR: ID demande manquant');
+      return errorResponse(res, 400, 'ID demande requis');
+    }
     
     const DemandeForçage = require('../models/DemandeForçage');
 
-    const demande = await DemandeForçage.findById(demandeId).populate('clientId', 'agence');
+    const demande = await DemandeForçage.findById(demandeId)
+      .populate('clientId', 'agence agencyId')
+      .populate('agencyId', 'name');
 
     if (!demande) {
       console.error('❌ [SAME_AGENCY] ERREUR: Demande introuvable');
@@ -391,26 +394,64 @@ const sameAgency = async (req, res, next) => {
 
     console.log('📋 [SAME_AGENCY] Demande trouvée:', {
       id: demande._id,
-      agence: demande.clientId?.agence,
-      client: demande.clientId?.email
+      agence: demande.agence || demande.clientId?.agence,
+      agencyId: demande.agencyId?._id || demande.clientId?.agencyId
     });
 
-    if (req.user.agence !== demande.clientId.agence) {
-      console.error('❌ [SAME_AGENCY] ERREUR: Agence différente');
-      console.log('📋 Agence utilisateur:', req.user.agence);
-      console.log('📋 Agence demande:', demande.clientId.agence);
-      console.log('='.repeat(80) + '\n');
-      return errorResponse(res, 403, 'Accès refusé - Agence différente');
+    // Vérification par agencyId (préféré)
+    if (req.user.agencyId && demande.agencyId) {
+      const sameAgencyById = demande.agencyId.toString() === req.user.agencyId.toString();
+      if (sameAgencyById) {
+        console.log('✅ [SAME_AGENCY] AgencyId correspond - Accès accordé');
+        console.log('='.repeat(80) + '\n');
+        return next();
+      }
     }
 
-    console.log('✅ [SAME_AGENCY] Agence vérifiée - Accès accordé');
+    // Vérification par nom d'agence (fallback)
+    const userAgence = req.user.agence;
+    const demandeAgence = demande.agence || demande.clientId?.agence;
+    
+    if (userAgence && demandeAgence && userAgence === demandeAgence) {
+      console.log('✅ [SAME_AGENCY] Nom d\'agence correspond - Accès accordé');
+      console.log('='.repeat(80) + '\n');
+      return next();
+    }
+
+    console.error('❌ [SAME_AGENCY] ERREUR: Agence différente');
+    console.log('📋 Agence utilisateur:', userAgence);
+    console.log('📋 Agence demande:', demandeAgence);
+    console.log('📋 AgencyId utilisateur:', req.user.agencyId);
+    console.log('📋 AgencyId demande:', demande.agencyId?._id);
     console.log('='.repeat(80) + '\n');
-    next();
+    return errorResponse(res, 403, 'Accès refusé - Agence différente');
+
   } catch (error) {
     console.error('❌ [SAME_AGENCY] ERREUR EXCEPTION:', error.message);
     console.error('📋 Stack:', error.stack);
     return errorResponse(res, 500, 'Erreur de vérification d\'agence');
   }
+};
+
+/**
+ * Middleware pour vérifier les permissions spécifiques
+ */
+const requirePermission = (permission) => {
+  return (req, res, next) => {
+    if (!req.user || !req.user.role) {
+      return errorResponse(res, 401, 'Non authentifié');
+    }
+
+    if (!PermissionHelper.hasPermission(req.user.role, permission)) {
+      return errorResponse(
+        res,
+        403,
+        `Permission refusée. Vous devez avoir la permission: ${permission}`
+      );
+    }
+
+    next();
+  };
 };
 
 /**
@@ -420,16 +461,19 @@ const requireAdmin = authorize('admin', 'dga', 'adg');
 const requireManager = authorize('rm', 'dce');
 const requireConseiller = authorize('conseiller');
 const requireClient = authorize('client');
+const requireRisques = authorize('risques');
 
 module.exports = {
   authenticate,
   authorize,
   canAuthorize,
   sameAgency,
+  requirePermission,
   requireAdmin,
   requireManager,
   requireConseiller,
   requireClient,
+  requireRisques,
   canViewDemande,
   canCreateDemande,
   canProcessDemande,

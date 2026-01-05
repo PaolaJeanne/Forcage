@@ -15,7 +15,7 @@ const { successResponse, errorResponse } = require('../utils/response.util');
 const User = require('../models/User');
 
 class DemandeForçageController {
-  
+
   // ==================== MÉTHODES PUBLIQUES ====================
 
   /**
@@ -109,7 +109,7 @@ class DemandeForçageController {
       // Créer demande
       const DemandeForçageModel = this.#getDemandeModel(); // ✅ CORRIGÉ: Renommer pour éviter confusion
       const nouvelleDemande = await DemandeForçageModel.create(demandeData);
-      
+
       // Peupler les informations client
       const demandePopulee = await DemandeForçageModel.findById(nouvelleDemande._id)
         .populate('clientId', 'nom prenom email telephone cni')
@@ -170,22 +170,22 @@ class DemandeForçageController {
     } catch (error) {
       console.error('❌ ERREUR CRÉATION DEMANDE:', error);
       console.error('Stack:', error.stack);
-      
+
       // Message d'erreur plus détaillé
       let errorMessage = 'Erreur lors de la création de la demande';
       let errorDetails = {};
-      
+
       if (process.env.NODE_ENV === 'development') {
         errorMessage = error.message;
         errorDetails = { stack: error.stack };
       } else {
-        errorDetails = { 
-          errorId: Date.now().toString(36), 
-          timestamp: new Date().toISOString() 
+        errorDetails = {
+          errorId: Date.now().toString(36),
+          timestamp: new Date().toISOString()
         };
         console.error(`[Error ${errorDetails.errorId}]`, error.message);
       }
-      
+
       return errorResponse(res, 500, errorMessage, errorDetails);
     }
   }
@@ -198,13 +198,13 @@ class DemandeForçageController {
       const logger = require('../utils/logger.util').child('DEMANDE_LIST');
       logger.header('LIST DEMANDES', '📋');
       logger.request('GET', '/demandes', req.user);
-      
+
       const filters = this.#construireFiltres(req);
       const options = this.#construireOptions(req);
 
       logger.debug('Filters applied:', filters);
       logger.debug('Options:', options);
-      
+
       const result = await DemandeForçageService.listerDemandes(filters, options);
       logger.success(`Found ${result.demandes.length} demandes`, { total: result.pagination.total });
 
@@ -251,10 +251,10 @@ class DemandeForçageController {
       const logger = require('../utils/logger.util').child('DEMANDE_GET');
       logger.header('GET DEMANDE', '🔍');
       logger.request('GET', `/demandes/${req.params.id}`, req.user);
-      
+
       const demandeId = req.params.id;
       logger.debug('Demande ID:', { id: demandeId });
-      
+
       const demande = await DemandeForçageService.getDemandeById(demandeId);
 
       if (!demande) {
@@ -331,7 +331,7 @@ class DemandeForçageController {
       const demande = await DemandeForçageModel.findById(id)
         .populate('clientId', 'nom prenom email cni')
         .populate('conseillerId', 'nom prenom email');
-      
+
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
@@ -644,7 +644,7 @@ class DemandeForçageController {
       const DemandeForçageModel = this.#getDemandeModel();
       const demande = await DemandeForçageModel.findById(id)
         .populate('clientId', 'nom prenom email cni');
-      
+
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
@@ -720,7 +720,7 @@ class DemandeForçageController {
       const DemandeForçageModel = this.#getDemandeModel();
       const demande = await DemandeForçageModel.findById(id)
         .populate('clientId', 'nom prenom email cni');
-      
+
       if (!demande) {
         return errorResponse(res, 404, 'Demande non trouvée');
       }
@@ -829,7 +829,7 @@ class DemandeForçageController {
       }
 
       const DemandeForçageModel = this.#getDemandeModel();
-      
+
       // Vérifier permissions
       const demande = await DemandeForçageModel.findById(req.params.id)
         .populate('clientId', '_id');
@@ -1008,6 +1008,8 @@ class DemandeForçageController {
       clientPrenom: client.prenom,
       clientEmail: client.email,
       clientTelephone: client.telephone,
+      clientCni: client.cni, // ✅ AJOUTÉ
+      clientNumeroCompte: client.numeroCompte, // ✅ AJOUTÉ
       historique: [{
         action: 'CREATION',
         statutAvant: null,
@@ -1044,7 +1046,7 @@ class DemandeForçageController {
     } else {
       demandeData.dateEcheance = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
     }
-    
+
     if (compteDebit) demandeData.compteDebit = compteDebit;
     if (commentaireInterne) demandeData.commentaireInterne = commentaireInterne;
 
@@ -1072,7 +1074,7 @@ class DemandeForçageController {
       if (lastDemande && lastDemande.numeroReference) {
         const lastSeq = parseInt(lastDemande.numeroReference.slice(-4)) || 0;
         sequence = lastSeq + 1;
-        
+
         // Si on dépasse 9999, on ajoute un suffixe
         if (sequence > 9999) {
           const suffix = String.fromCharCode(65 + Math.floor((sequence - 10000) / 1000));
@@ -1178,8 +1180,8 @@ class DemandeForçageController {
         // ✅ CORRECTION: Filtrer par agence ET/OU conseiller assigné
         filters.$or = [
           { conseillerId: userId }, // Demandes assignées à ce conseiller
-          { 
-            agenceId: agence, 
+          {
+            agenceId: agence,
             conseillerId: null // Demandes non assignées dans cette agence
           }
         ];
@@ -1208,7 +1210,7 @@ class DemandeForçageController {
     // Filtres additionnels
     if (statut) filters.statut = statut;
     if (priorite) filters.priorite = priorite;
-    
+
     if (dateDebut || dateFin) {
       filters.createdAt = {};
       if (dateDebut) filters.createdAt.$gte = new Date(dateDebut);
@@ -1234,7 +1236,7 @@ class DemandeForçageController {
    */
   async #adapterReponseDemandes(demandes, user) {
     const role = user.role;
-    
+
     return demandes.map((demande, index) => {
       // Logging pour déboguer
       console.log(`🔍 Demande ${index}:`, {
@@ -1250,7 +1252,7 @@ class DemandeForçageController {
       let clientNomComplet = 'N/A';
       let clientEmail = 'N/A';
       let clientCni = 'N/A';
-      
+
       if (demande.clientId && typeof demande.clientId === 'object') {
         // Client est un objet populé
         clientNomComplet = `${demande.clientId.prenom || ''} ${demande.clientId.nom || ''}`.trim() || 'N/A';
@@ -1336,7 +1338,7 @@ class DemandeForçageController {
         const conseillerId = demande.conseillerId._id ? demande.conseillerId._id.toString() : demande.conseillerId.toString();
         if (conseillerId === user.id) return true;
       }
-      
+
       // Peut aussi voir les demandes de son agence (même si non assignées)
       return demande.agenceId === user.agence;
     }
@@ -1354,80 +1356,80 @@ class DemandeForçageController {
    */
   // src/controllers/demandeForçage.controller.js - VERSION CORRIGÉE COMPLÈTE
 
-// Dans la méthode #formaterReponseDemande, remplacer par :
+  // Dans la méthode #formaterReponseDemande, remplacer par :
 
-async #formaterReponseDemande(demande, user) {
-  const base = {
-    id: demande._id,
-    numeroReference: demande.numeroReference,
-    statut: demande.statut,
-    montant: demande.montant,
-    typeOperation: demande.typeOperation,
-    motif: demande.motif,
-    scoreRisque: demande.scoreRisque,
-    priorite: demande.priorite || 'NORMALE',
-    createdAt: demande.createdAt,
-    updatedAt: demande.updatedAt,
-    enRetard: demande.enRetard || false,
-    dateEcheance: demande.dateEcheance,
-    joursRestants: demande.dateEcheance ?
-      Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null,
-    
-    // ✅ AJOUT DES CHAMPS MANQUANTS
-    dureeExhaustive: demande.dureeExhaustive,
-    tauxInteret: demande.tauxInteret,
-    garanties: demande.garanties || [],
-    observations: demande.observations,
-    motifDerogation: demande.motifDerogation,
-    compteNumero: demande.compteNumero,
-    compteDebit: demande.compteDebit,
-    devise: demande.devise || 'XAF',
-    
-    clientNomComplet: demande.clientNomComplet || 
-      (demande.clientId ? `${demande.clientId.prenom} ${demande.clientId.nom}` : 
-      (demande.clientPrenom && demande.clientNom ? `${demande.clientPrenom} ${demande.clientNom}` : 'Client'))
-  };
+  async #formaterReponseDemande(demande, user) {
+    const base = {
+      id: demande._id,
+      numeroReference: demande.numeroReference,
+      statut: demande.statut,
+      montant: demande.montant,
+      typeOperation: demande.typeOperation,
+      motif: demande.motif,
+      scoreRisque: demande.scoreRisque,
+      priorite: demande.priorite || 'NORMALE',
+      createdAt: demande.createdAt,
+      updatedAt: demande.updatedAt,
+      enRetard: demande.enRetard || false,
+      dateEcheance: demande.dateEcheance,
+      joursRestants: demande.dateEcheance ?
+        Math.ceil((new Date(demande.dateEcheance) - new Date()) / (1000 * 60 * 60 * 24)) : null,
 
-  // Infos client complètes
-  base.client = {
-    id: demande.clientId._id ? demande.clientId._id : demande.clientId,
-    nom: demande.clientId.nom || demande.clientNom || 'N/A',
-    prenom: demande.clientId.prenom || demande.clientPrenom || 'N/A',
-    email: demande.clientId.email || demande.clientEmail || 'N/A',
-    telephone: demande.clientId.telephone || demande.clientTelephone || 'N/A',
-    cni: demande.clientId?.cni || 'N/A', // ✅ AJOUTÉ
-    numeroCompte: demande.clientId?.numeroCompte || demande.compteNumero || 'N/A', // ✅ AJOUTÉ
-    agence: demande.clientId?.agence || demande.agenceId || 'N/A', // ✅ AJOUTÉ
-    nomComplet: demande.clientNomComplet || 
-      `${demande.clientId?.prenom || demande.clientPrenom || ''} ${demande.clientId?.nom || demande.clientNom || ''}`.trim()
-  };
+      // ✅ AJOUT DES CHAMPS MANQUANTS
+      dureeExhaustive: demande.dureeExhaustive,
+      tauxInteret: demande.tauxInteret,
+      garanties: demande.garanties || [],
+      observations: demande.observations,
+      motifDerogation: demande.motifDerogation,
+      compteNumero: demande.compteNumero,
+      compteDebit: demande.compteDebit,
+      devise: demande.devise || 'XAF',
 
-  // Infos supplémentaires selon rôle
-  if (user.role !== 'client') {
-    base.client.notationClient = demande.notationClient || 'C';
-    base.client.classification = demande.classification;
+      clientNomComplet: demande.clientNomComplet ||
+        (demande.clientId ? `${demande.clientId.prenom} ${demande.clientId.nom}` :
+          (demande.clientPrenom && demande.clientNom ? `${demande.clientPrenom} ${demande.clientNom}` : 'Client'))
+    };
 
-    base.agenceId = demande.agenceId;
-    base.conseiller = demande.conseillerId;
-    base.montantAutorise = demande.montantAutorise;
-    base.commentaireTraitement = demande.commentaireTraitement;
-    base.piecesJustificatives = demande.piecesJustificatives;
-    base.commentaireInterne = demande.commentaireInterne; // ✅ AJOUTÉ
+    // Infos client complètes
+    base.client = {
+      id: demande.clientId._id ? demande.clientId._id : demande.clientId,
+      nom: demande.clientId.nom || demande.clientNom || 'N/A',
+      prenom: demande.clientId.prenom || demande.clientPrenom || 'N/A',
+      email: demande.clientId.email || demande.clientEmail || 'N/A',
+      telephone: demande.clientId.telephone || demande.clientTelephone || 'N/A',
+      cni: demande.clientId?.cni || demande.clientCni || 'N/A', // ✅ Vérifier aussi demande.clientCni
+      numeroCompte: demande.clientId?.numeroCompte || demande.clientNumeroCompte || demande.compteNumero || 'N/A', // ✅ Vérifier aussi demande.clientNumeroCompte
+      agence: demande.clientId?.agence || demande.clientAgence || demande.agenceId || 'N/A', // ✅ Vérifier aussi demande.clientAgence
+      nomComplet: demande.clientNomComplet ||
+        `${demande.clientId?.prenom || demande.clientPrenom || ''} ${demande.clientId?.nom || demande.clientNom || ''}`.trim()
+    };
 
-    if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
-      base.soldeActuel = demande.soldeActuel;
-      base.decouvertAutorise = demande.decouvertAutorise;
-      base.montantForçageTotal = demande.montantForçageTotal;
-      base.historique = demande.historique;
-      base.validePar_conseiller = demande.validePar_conseiller;
-      base.validePar_rm = demande.validePar_rm;
-      base.validePar_dce = demande.validePar_dce;
-      base.validePar_adg = demande.validePar_adg;
+    // Infos supplémentaires selon rôle
+    if (user.role !== 'client') {
+      base.client.notationClient = demande.notationClient || 'C';
+      base.client.classification = demande.classification;
+
+      base.agenceId = demande.agenceId;
+      base.conseiller = demande.conseillerId;
+      base.montantAutorise = demande.montantAutorise;
+      base.commentaireTraitement = demande.commentaireTraitement;
+      base.piecesJustificatives = demande.piecesJustificatives;
+      base.commentaireInterne = demande.commentaireInterne; // ✅ AJOUTÉ
+
+      if (['admin', 'dga', 'adg', 'risques'].includes(user.role)) {
+        base.soldeActuel = demande.soldeActuel;
+        base.decouvertAutorise = demande.decouvertAutorise;
+        base.montantForçageTotal = demande.montantForçageTotal;
+        base.historique = demande.historique;
+        base.validePar_conseiller = demande.validePar_conseiller;
+        base.validePar_rm = demande.validePar_rm;
+        base.validePar_dce = demande.validePar_dce;
+        base.validePar_adg = demande.validePar_adg;
+      }
     }
-  }
 
-  return base;
-}
+    return base;
+  }
 
   /**
    * Vérifier si peut soumettre
@@ -1458,7 +1460,7 @@ async #formaterReponseDemande(demande, user) {
 
     if (req.query.dateDebut) filters.dateDebut = req.query.dateDebut;
     if (req.query.dateFin) filters.dateFin = req.query.dateFin;
-    
+
     if (req.query.agenceId && ['admin', 'dga', 'adg', 'risques'].includes(req.user.role)) {
       filters.agenceId = req.query.agenceId;
     }
@@ -1516,7 +1518,7 @@ async #formaterReponseDemande(demande, user) {
     try {
       // Utiliser l'ID du user connecté (qui est le client)
       const clientId = user.id || user._id;
-      
+
       console.log('📧 Envoi notification création:', {
         clientId: clientId.toString(),
         userId: user.id,
@@ -1524,7 +1526,7 @@ async #formaterReponseDemande(demande, user) {
         demandeId: demande._id.toString(),
         userRole: user.role
       });
-      
+
       const result = await NotificationService.createNotification({
         utilisateur: clientId,
         titre: '✅ Demande créée',
@@ -1543,7 +1545,7 @@ async #formaterReponseDemande(demande, user) {
         },
         tags: ['demande', 'creation']
       });
-      
+
       console.log('✅ Notification création envoyée:', result._id);
     } catch (error) {
       console.error('❌ Erreur notification création:', error.message);
@@ -1554,7 +1556,7 @@ async #formaterReponseDemande(demande, user) {
     try {
       // Utiliser l'ID du user connecté (qui est le client)
       const clientId = user.id || user._id;
-      
+
       console.log('📧 Envoi notification soumission:', {
         clientId: clientId.toString(),
         userId: user.id,
@@ -1562,7 +1564,7 @@ async #formaterReponseDemande(demande, user) {
         demandeId: demande._id.toString(),
         userRole: user.role
       });
-      
+
       const result = await NotificationService.createNotification({
         utilisateur: clientId,
         titre: '📤 Demande soumise',
@@ -1570,7 +1572,7 @@ async #formaterReponseDemande(demande, user) {
         entite: 'demande',
         entiteId: demande._id,
         type: 'info',
-        categorie: 'demande_soumission',
+        categorie: 'demande',
         priorite: 'normale',
         lien: `/demandes/${demande._id}`,
         metadata: {
@@ -1580,7 +1582,7 @@ async #formaterReponseDemande(demande, user) {
         },
         tags: ['demande', 'soumission']
       });
-      
+
       console.log('✅ Notification soumission envoyée:', result._id);
     } catch (error) {
       console.error('❌ Erreur notification soumission:', error.message);
@@ -1590,7 +1592,7 @@ async #formaterReponseDemande(demande, user) {
   async #notifierAnnulation(demande, user) {
     try {
       const clientId = demande.clientId._id ? demande.clientId._id : demande.clientId;
-      
+
       await NotificationService.createNotification({
         utilisateur: clientId,
         titre: '❌ Demande annulée',
@@ -1615,7 +1617,7 @@ async #formaterReponseDemande(demande, user) {
   async #notifierModification(demande, user) {
     try {
       const clientId = demande.clientId._id ? demande.clientId._id : demande.clientId;
-      
+
       await NotificationService.createNotification({
         utilisateur: clientId,
         titre: '✏️ Demande modifiée',
@@ -1640,7 +1642,7 @@ async #formaterReponseDemande(demande, user) {
   async #notifierTraitement(demande, nouveauStatut, user) {
     try {
       const clientId = demande.clientId._id ? demande.clientId._id : demande.clientId;
-      
+
       const statutMessages = {
         'APPROUVEE': 'a été approuvée ✅',
         'REJETEE': 'a été rejetée ❌',
@@ -1650,22 +1652,22 @@ async #formaterReponseDemande(demande, user) {
       };
 
       const message = statutMessages[nouveauStatut] || `a changé de statut: ${nouveauStatut}`;
-      
+
       console.log('📧 Envoi notification traitement:', {
         clientId: clientId.toString(),
         demandeRef: demande.numeroReference,
         demandeId: demande._id,
         nouveauStatut: nouveauStatut
       });
-      
+
       await NotificationService.createNotification({
         utilisateur: clientId,
         titre: `📋 Demande ${demande.numeroReference} - ${nouveauStatut}`,
         message: `Votre demande ${message}`,
         entite: 'demande',
         entiteId: demande._id,
-        type: nouveauStatut === 'REJETEE' ? 'error' : 
-              nouveauStatut === 'APPROUVEE' ? 'success' : 'info',
+        type: nouveauStatut === 'REJETEE' ? 'error' :
+          nouveauStatut === 'APPROUVEE' ? 'success' : 'info',
         categorie: 'demande_traitement',
         priorite: 'normale',
         lien: `/demandes/${demande._id}`,
@@ -1678,7 +1680,7 @@ async #formaterReponseDemande(demande, user) {
         declencheur: user.id,
         tags: ['demande', 'traitement', nouveauStatut]
       });
-      
+
       console.log('✅ Notification traitement envoyée');
     } catch (error) {
       console.warn('⚠️ Erreur notification traitement:', error.message);
@@ -1688,7 +1690,7 @@ async #formaterReponseDemande(demande, user) {
   async #notifierRegularisation(demande, user) {
     try {
       const clientId = demande.clientId._id ? demande.clientId._id : demande.clientId;
-      
+
       await NotificationService.createNotification({
         utilisateur: clientId,
         titre: '✅ Demande régularisée',

@@ -259,82 +259,11 @@ app.get('/health', (req, res) => {
 });
 
 // ==========================================
-// Routes API - CHARGEMENT DYNAMIQUE
+// Routes API
 // ==========================================
+const apiRoutes = require('./routes/api.routes');
+app.use('/api/v1', apiRoutes);
 
-// Fonction pour charger une route avec gestion d'erreur améliorée
-function loadRoute(routePath, routeName, mountPath) {
-  try {
-    console.log(`>>> [DEBUG] Chargement route "${routeName}" depuis ${routePath}...`);
-
-    // Utiliser require avec le chemin relatif directement
-    // Node.js gère automatiquement .js et index.js
-    const routeModule = require(routePath);
-
-    if (routeModule && typeof routeModule === 'function') {
-      app.use(mountPath, routeModule);
-      console.log(`    ✅ Route "${routeName}" chargée (function middleware).`);
-      return true;
-    } else if (routeModule && (routeModule.router || routeModule.default)) {
-      // Support pour export default et export router
-      const router = routeModule.router || routeModule.default || routeModule;
-      app.use(mountPath, router);
-      console.log(`    ✅ Route "${routeName}" chargée (router object).`);
-      return true;
-    } else {
-      console.warn(`!!! [WARN] Module route "${routeName}" export invalide. Type: ${typeof routeModule}`);
-      return false;
-    }
-
-  } catch (error) {
-    // Erreur spécifique si le module n'est pas trouvé
-    if (error.code === 'MODULE_NOT_FOUND') {
-      console.warn(`    ⚠️  Route "${routeName}" non trouvée: ${routePath}`);
-      console.warn(`       Détail: ${error.message}`);
-    } else {
-      console.error(`!!! [ERREUR] Exception lors du chargement de la route "${routeName}":`, error.message);
-      if (config.env === 'development') {
-        console.error('Stack trace:', error.stack);
-      }
-    }
-    return false;
-  }
-}
-
-// Liste des routes à charger avec leurs chemins
-const routesToLoad = [
-  { path: './routes/auth.routes', name: 'Authentification', mount: '/api/v1/auth' },
-  { path: './routes/demandeForçage.routes', name: 'Demandes', mount: '/api/v1/demandes' },
-  { path: './routes/admin.routes', name: 'Administration', mount: '/api/v1/admin' },
-  { path: './routes/admin.users.routes', name: 'Admin Users', mount: '/api/v1/admin/users' },
-  { path: './routes/notification.routes', name: 'Notifications', mount: '/api/v1/notifications' },
-  { path: './routes/dashboard.routes', name: 'Dashboard', mount: '/api/v1/dashboard' },
-  { path: './routes/workflow.routes', name: 'Workflow', mount: '/api/v1/workflow' },
-  { path: './routes/export.routes', name: 'Export', mount: '/api/v1/export' },
-  { path: './routes/sms.routes', name: 'SMS', mount: '/api/v1/sms' },
-  { path: './routes/signature.routes', name: 'Signatures', mount: '/api/v1/signatures' }
-];
-
-// Routes optionnelles (ne bloquent pas le démarrage)
-const optionalRoutes = [
-  { path: './routes/document.routes', name: 'Documents', mount: '/api/v1/documents' },
-  { path: './routes/audit.routes', name: 'Audit', mount: '/api/v1/audit' },
-  { path: './routes/chat.routes', name: 'Chat', mount: '/api/v1/chat' }
-];
-
-let loadedRoutes = 0;
-console.log('>>> [DEBUG] Début du chargement des routes principales...');
-routesToLoad.forEach(route => {
-  if (loadRoute(route.path, route.name, route.mount)) {
-    loadedRoutes++;
-  }
-});
-console.log(`>>> [DEBUG] Routes principales chargées : ${loadedRoutes}/${routesToLoad.length}`);
-
-console.log('>>> [DEBUG] Début du chargement des routes optionnelles...');
-optionalRoutes.forEach(route => {
-  loadRoute(route.path, route.name, route.mount);
-});
 
 // ==========================================
 // Routes API WebSocket

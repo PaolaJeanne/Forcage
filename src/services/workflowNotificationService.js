@@ -89,7 +89,7 @@ class WorkflowNotificationService {
                         entiteId: demande._id,
                         type: notificationData.type,
                         priorite: notificationData.priorite,
-                        categorie: 'workflow',
+                        categorie: 'validation',
                         action: 'view',
                         lien: `/demandes/${demande._id}`,
                         metadata: {
@@ -136,7 +136,7 @@ class WorkflowNotificationService {
                     entiteId: demande._id,
                     type: 'error',
                     priorite: 'haute',
-                    categorie: 'workflow',
+                    categorie: 'validation',
                     action: 'view',
                     lien: `/demandes/${demande._id}`,
                     metadata: {
@@ -166,7 +166,7 @@ class WorkflowNotificationService {
                     entiteId: demande._id,
                     type: 'warning',
                     priorite: 'normale',
-                    categorie: 'workflow',
+                    categorie: 'validation',
                     action: 'view',
                     lien: `/demandes/${demande._id}`,
                     metadata: {
@@ -218,7 +218,7 @@ class WorkflowNotificationService {
                     entiteId: demande._id,
                     type: 'info',
                     priorite: 'normale',
-                    categorie: 'workflow',
+                    categorie: 'validation',
                     action: 'view',
                     lien: `/demandes/${demande._id}`,
                     metadata: {
@@ -273,7 +273,7 @@ class WorkflowNotificationService {
                         entiteId: demande._id,
                         type: 'warning',
                         priorite: 'haute',
-                        categorie: 'workflow',
+                        categorie: 'validation',
                         action: 'view',
                         lien: `/demandes/${demande._id}`,
                         metadata: {
@@ -312,7 +312,7 @@ class WorkflowNotificationService {
                             entiteId: demande._id,
                             type: 'urgent',
                             priorite: 'critique',
-                            categorie: 'workflow',
+                            categorie: 'validation',
                             action: 'view',
                             lien: `/demandes/${demande._id}`,
                             metadata: {
@@ -354,7 +354,7 @@ class WorkflowNotificationService {
                 entiteId: demande._id,
                 type: 'info',
                 priorite: 'normale',
-                categorie: 'workflow',
+                categorie: 'validation',
                 action: 'view',
                 lien: `/demandes/${demande._id}`,
                 metadata: {
@@ -393,7 +393,7 @@ class WorkflowNotificationService {
                     entiteId: demande._id,
                     type: 'success',
                     priorite: 'haute',
-                    categorie: 'workflow',
+                    categorie: 'validation',
                     action: 'view',
                     lien: `/demandes/${demande._id}`,
                     metadata: {
@@ -423,7 +423,7 @@ class WorkflowNotificationService {
                     entiteId: demande._id,
                     type: 'success',
                     priorite: 'normale',
-                    categorie: 'workflow',
+                    categorie: 'validation',
                     action: 'view',
                     lien: `/demandes/${demande._id}`,
                     metadata: {

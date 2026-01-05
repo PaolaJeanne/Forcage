@@ -31,7 +31,7 @@ module.exports = {
   STATUTS_DEMANDE: {
     // Phase client
     BROUILLON: 'BROUILLON',           // En cours de rédaction
-    ENVOYEE: 'ENVOYEE',               // Soumise par client (statut temporaire)
+    ENVOYEE: 'ENVOYEE',               // Soumise par client
 
     // Phase conseiller
     EN_ATTENTE_CONSEILLER: 'EN_ATTENTE_CONSEILLER', // À traiter par conseiller
@@ -58,6 +58,38 @@ module.exports = {
     ANNULEE: 'ANNULEE'                  // Annulée par le client
   },
 
+  // ========== TRANSITIONS DE STATUT AUTORISÉES PAR RÔLE ==========
+  TRANSITIONS_PAR_ROLE: {
+    client: {
+      BROUILLON: ['ENVOYEE', 'ANNULEE'],
+      ENVOYEE: ['ANNULEE']
+    },
+    conseiller: {
+      EN_ATTENTE_CONSEILLER: ['EN_ETUDE_CONSEILLER', 'RETOURNER'],
+      EN_ETUDE_CONSEILLER: ['EN_ATTENTE_RM', 'EN_ANALYSE_RISQUES', 'REJETEE', 'RETOURNER']
+    },
+    rm: {
+      EN_ATTENTE_RM: ['EN_ATTENTE_DCE', 'APPROUVEE', 'REJETEE', 'RETOURNER'],
+      EN_ETUDE_CONSEILLER: ['EN_ATTENTE_RM', 'EN_ANALYSE_RISQUES', 'REJETEE', 'RETOURNER']
+    },
+    dce: {
+      EN_ATTENTE_DCE: ['EN_ATTENTE_ADG', 'APPROUVEE', 'REJETEE', 'RETOURNER']
+    },
+    adg: {
+      EN_ATTENTE_ADG: ['APPROUVEE', 'REJETEE', 'RETOURNER', 'EN_ANALYSE_RISQUES']
+    },
+    risques: {
+      EN_ANALYSE_RISQUES: ['APPROUVEE', 'REJETEE']
+    },
+    dga: {
+      EN_ATTENTE_ADG: ['APPROUVEE', 'REJETEE'],
+      EN_ANALYSE_RISQUES: ['APPROUVEE', 'REJETEE']
+    },
+    admin: {
+      '*': ['APPROUVEE', 'REJETEE', 'ANNULEE', 'DECAISSEE', 'REGULARISEE']
+    }
+  },
+
   // ========== ACTIONS POSSIBLES ==========
   ACTIONS_DEMANDE: {
     // Client
@@ -74,24 +106,6 @@ module.exports = {
     // Exécution
     DECAISSER: 'DECAISSER',   // Débloquer les fonds
     REGULARISER: 'REGULARISER' // Marquer comme remboursée
-  },
-
-  // ========== TRANSITIONS DE STATUT AUTORISÉES ==========
-  TRANSITIONS_AUTORISEES: {
-    BROUILLON: ['ENVOYEE', 'ANNULEE'],
-    ENVOYEE: ['EN_ATTENTE_CONSEILLER', 'ANNULEE'],
-    EN_ATTENTE_CONSEILLER: ['EN_ETUDE_CONSEILLER', 'EN_ATTENTE_RM', 'REJETEE', 'RETOURNER'],
-    EN_ETUDE_CONSEILLER: ['EN_ATTENTE_CONSEILLER', 'EN_ATTENTE_RM', 'EN_ANALYSE_RISQUES', 'APPROUVEE', 'REJETEE'],
-    EN_ATTENTE_RM: ['EN_ATTENTE_DCE', 'APPROUVEE', 'REJETEE', 'RETOURNER'],
-    EN_ATTENTE_DCE: ['EN_ATTENTE_ADG', 'APPROUVEE', 'REJETEE', 'RETOURNER'],
-    EN_ATTENTE_ADG: ['APPROUVEE', 'REJETEE', 'RETOURNER'],
-    EN_ANALYSE_RISQUES: ['APPROUVEE', 'REJETEE'],
-    APPROUVEE: ['DECAISSEE'],
-    DECAISSEE: ['EN_SUIVI'],
-    EN_SUIVI: ['REGULARISEE'],
-    REJETEE: [], // Statut final
-    REGULARISEE: [], // Statut final
-    ANNULEE: [] // Statut final
   },
 
   // ========== NOTATIONS CLIENT ==========
@@ -205,5 +219,17 @@ module.exports = {
       AGENCE_PAR_DEFAUT: 'Agence Centrale',
       CONSEILLER_PAR_DEFAUT: null // null = premier conseiller disponible
     }
+  },
+
+  // ========== VALIDATION DES AGENCES PAR RÔLE ==========
+  AGENCY_VALIDATION: {
+    // Rôles qui doivent avoir une agence
+    REQUIRES_AGENCY: ['conseiller', 'rm', 'dce', 'adg', 'risques'],
+    
+    // Rôles qui peuvent avoir une agence optionnelle
+    OPTIONAL_AGENCY: ['dga', 'admin'],
+    
+    // Rôles qui ne doivent PAS avoir d'agence
+    NO_AGENCY: ['client']
   }
 };

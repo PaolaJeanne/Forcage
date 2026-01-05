@@ -181,7 +181,7 @@ class WorkflowNotificationService {
                         entiteId: demande._id,
                         type: 'warning',
                         priorite: 'haute',
-                        categorie: 'workflow',
+                        categorie: 'validation',
                         action: 'view',
                         lien: `/demandes/${demande._id}`,
                         metadata: {

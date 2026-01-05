@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt.util');
 const { successResponse, errorResponse } = require('../utils/response.util');
 const { PERMISSIONS } = require('../constants/roles');
+const NotificationService = require('../services/notification.service');
 
 // Utilitaire pour obtenir les permissions d'un rôle
 const getPermissionsForRole = (role) => {
@@ -61,10 +62,26 @@ const register = async (req, res) => {
       limiteAutorisation: 0,
       classification: 'normal',
       notationClient: 'C',
-      kycValide: false
+      kycValide: false,
+      agence: null, // Clients n'ont pas d'agence
+      agencyId: null // Clients n'ont pas d'agence
     });
 
     await user.save();
+
+    // ✅ Envoyer une notification de bienvenue
+    try {
+      await NotificationService.createNotification({
+        utilisateur: user._id,
+        type: 'SYSTEME',
+        titre: 'Bienvenue sur CreditApp',
+        message: `Bienvenue ${user.prenom} ! Votre compte a été créé avec succès.`,
+        priorite: 'MOYENNE',
+        categorie: 'Alerte'
+      });
+    } catch (notificationError) {
+      console.error('⚠️ Erreur notification bienvenue:', notificationError);
+    }
 
     return successResponse(res, 201, 'Inscription réussie', {
       user: {
@@ -128,6 +145,7 @@ const login = async (req, res) => {
       prenom: user.prenom,
       limiteAutorisation: user.limiteAutorisation,
       agence: user.agence,
+      agencyId: user.agencyId, // Ajouté
       isActive: user.isActive
     });
 
@@ -150,6 +168,7 @@ const login = async (req, res) => {
         role: user.role,
         permissions, // Ajout des permissions explicites
         agence: user.agence,
+        agencyId: user.agencyId, // Ajouté
         limiteAutorisation: user.limiteAutorisation,
         telephone: user.telephone,
         numeroCompte: user.numeroCompte,
@@ -190,6 +209,7 @@ const getProfile = async (req, res) => {
         role: user.role,
         permissions, // Ajout des permissions
         agence: user.agence,
+        agencyId: user.agencyId, // Ajouté
         limiteAutorisation: user.limiteAutorisation,
         telephone: user.telephone,
         numeroCompte: user.numeroCompte,
@@ -239,6 +259,7 @@ const refreshToken = async (req, res) => {
       prenom: user.prenom,
       limiteAutorisation: user.limiteAutorisation,
       agence: user.agence,
+      agencyId: user.agencyId, // Ajouté
       isActive: user.isActive
     });
 
@@ -320,6 +341,20 @@ const changePassword = async (req, res) => {
     user.password = newPassword;
     await user.save();
 
+    // ✅ Envoyer une notification de changement de mot de passe
+    try {
+      await NotificationService.createNotification({
+        utilisateur: user._id,
+        type: 'SECURITE',
+        titre: 'Sécurité : Mot de passe modifié',
+        message: 'Votre mot de passe a été modifié avec succès. Si vous n\'êtes pas à l\'origine de cette action, veuillez contacter le support.',
+        priorite: 'HAUTE',
+        categorie: 'Alerte'
+      });
+    } catch (notificationError) {
+      console.error('⚠️ Erreur notification mot de passe:', notificationError);
+    }
+
     console.log('✅ PASSWORD CHANGED:', user.email);
 
     const newToken = generateToken({
@@ -330,6 +365,7 @@ const changePassword = async (req, res) => {
       prenom: user.prenom,
       limiteAutorisation: user.limiteAutorisation,
       agence: user.agence,
+      agencyId: user.agencyId, // Ajouté
       isActive: user.isActive
     });
 

@@ -99,6 +99,19 @@ const DemandeForçageSchema = new Schema({
     type: String,
     trim: true
   },
+  clientCni: {
+    type: String,
+    trim: true
+  },
+  clientNumeroCompte: {
+    type: String,
+    uppercase: true,
+    trim: true
+  },
+  clientAgence: {
+    type: String,
+    trim: true
+  },
   
   // Références autres
   conseillerId: {
@@ -288,13 +301,16 @@ DemandeForçageSchema.pre('save', async function () {
     // Si clientId est modifié ou si les infos client sont manquantes
     if ((this.isModified('clientId') || !this.clientNom) && this.clientId) {
       const User = mongoose.model('User');
-      const client = await User.findById(this.clientId).select('nom prenom email telephone');
+      const client = await User.findById(this.clientId).select('nom prenom email telephone cni numeroCompte agence');
       
       if (client) {
         this.clientNom = client.nom;
         this.clientPrenom = client.prenom;
         this.clientEmail = client.email;
         this.clientTelephone = client.telephone;
+        this.clientCni = client.cni; // ✅ AJOUTÉ
+        this.clientNumeroCompte = client.numeroCompte; // ✅ AJOUTÉ
+        this.clientAgence = client.agence; // ✅ AJOUTÉ
         console.log(`✅ Infos client mises à jour pour la demande: ${client.prenom} ${client.nom}`);
       } else {
         console.warn(`⚠️ Client non trouvé avec ID: ${this.clientId}`);
@@ -319,13 +335,16 @@ DemandeForçageSchema.pre('findOneAndUpdate', async function () {
   if (update.clientId) {
     try {
       const User = mongoose.model('User');
-      const client = await User.findById(update.clientId).select('nom prenom email telephone');
+      const client = await User.findById(update.clientId).select('nom prenom email telephone cni numeroCompte agence');
       
       if (client) {
         update.clientNom = client.nom;
         update.clientPrenom = client.prenom;
         update.clientEmail = client.email;
         update.clientTelephone = client.telephone;
+        update.clientCni = client.cni; // ✅ AJOUTÉ
+        update.clientNumeroCompte = client.numeroCompte; // ✅ AJOUTÉ
+        update.clientAgence = client.agence; // ✅ AJOUTÉ
         this.setUpdate(update);
       }
     } catch (error) {

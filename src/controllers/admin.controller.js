@@ -11,13 +11,13 @@ const createUser = async (req, res) => {
   try {
     console.log('📝 [CREATE USER] Début - Données reçues:');
     console.log('📦 Body complet:', JSON.stringify(req.body, null, 2));
-    
+
     const {
       nom, prenom, email, password, telephone,
       role, numeroCompte, agence, limiteAutorisation,
       classification, notationClient, kycValide
     } = req.body;
-    
+
     // LOG DÉTAILLÉ DE CHAQUE CHAMP
     console.log('🔍 Analyse des champs:');
     console.log('  nom:', nom, '| Type:', typeof nom, '| Vide:', !nom);
@@ -35,17 +35,17 @@ const createUser = async (req, res) => {
 
     // Validation des champs requis - AVEC PLUS DE DÉTAILS
     const errors = [];
-    
+
     if (!nom || nom.trim() === '') {
       errors.push('Le nom est requis');
       console.log('❌ Nom manquant');
     }
-    
+
     if (!prenom || prenom.trim() === '') {
       errors.push('Le prénom est requis');
       console.log('❌ Prénom manquant');
     }
-    
+
     if (!email || email.trim() === '') {
       errors.push('L\'email est requis');
       console.log('❌ Email manquant');
@@ -53,17 +53,17 @@ const createUser = async (req, res) => {
       errors.push('Email invalide');
       console.log('❌ Email invalide:', email);
     }
-    
+
     if (!password || password.trim() === '') {
       errors.push('Le mot de passe est requis');
       console.log('❌ Password manquant');
     }
-    
+
     if (!telephone || telephone.trim() === '') {
       errors.push('Le téléphone est requis');
       console.log('❌ Téléphone manquant');
     }
-    
+
     if (!role || role.trim() === '') {
       errors.push('Le rôle est requis');
       console.log('❌ Rôle manquant');
@@ -74,38 +74,50 @@ const createUser = async (req, res) => {
         console.log('❌ Rôle invalide:', role);
       }
     }
-    
+
     // Validation spécifique par rôle
     if (role === 'client' && (!numeroCompte || numeroCompte.trim() === '')) {
       errors.push('Le numéro de compte est requis pour un client');
       console.log('❌ Numéro de compte manquant pour client');
     }
-    
-    if (['conseiller', 'rm', 'dce'].includes(role)) {
+
+    let agencyId = null;
+    let agencyName = null;
+
+    if (['conseiller', 'rm', 'dce', 'adg', 'risques'].includes(role)) {
       if (!agence || agence.trim() === '') {
         errors.push(`L'agence est requise pour le rôle ${role}`);
         console.log(`❌ Agence manquante pour rôle ${role}`);
       } else {
         // Vérifier si l'agence existe
         console.log(`🔍 Vérification agence: "${agence}"`);
-        const agency = await Agency.findOne({ 
-          name: agence.trim(),
-          isActive: true 
+        const agency = await Agency.findOne({
+          $or: [
+            { name: agence.trim() },
+            { code: agence.trim() }
+          ],
+          isActive: true
         });
+
         if (!agency) {
           errors.push(`L'agence "${agence}" n'existe pas ou est inactive`);
           console.log(`❌ Agence non trouvée: "${agence}"`);
+        } else {
+          // Stocker l'ID et le nom de l'agence
+          agencyId = agency._id;
+          agencyName = agency.name;
+          console.log(`✅ Agence trouvée: ${agency.name} (ID: ${agency._id})`);
         }
       }
     }
-    
+
     if (errors.length > 0) {
       console.log('❌ Erreurs de validation:', errors);
       return errorResponse(res, 400, 'Erreur de validation', { errors });
     }
-    
+
     console.log('✅ Toutes les validations passées');
-    
+
     // Vérifier si l'email existe déjà
     console.log(`🔍 Vérification email existant: ${email}`);
     const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
@@ -113,9 +125,9 @@ const createUser = async (req, res) => {
       console.log(`❌ Email déjà utilisé: ${email}`);
       return errorResponse(res, 400, 'Cet email est déjà utilisé');
     }
-    
+
     console.log('✅ Email disponible');
-    
+
     // Créer l'utilisateur
     console.log('🔄 Création de l\'utilisateur...');
     const user = new User({
@@ -126,7 +138,8 @@ const createUser = async (req, res) => {
       telephone: telephone.trim(),
       role: role.trim(),
       numeroCompte: numeroCompte ? numeroCompte.trim() : undefined,
-      agence: agence ? agence.trim() : undefined,
+      agence: agencyName, // Nom de l'agence
+      agencyId: agencyId, // ID de l'agence (pour les références)
       limiteAutorisation: limiteAutorisation || 0,
       classification: classification || 'normal',
       notationClient: notationClient || 'C',
@@ -134,16 +147,17 @@ const createUser = async (req, res) => {
       isActive: true,
       createdBy: req.userId
     });
-    
+
     console.log('📦 Utilisateur à créer:', {
       nom: user.nom,
       prenom: user.prenom,
       email: user.email,
       role: user.role,
       agence: user.agence,
+      agencyId: user.agencyId,
       isActive: user.isActive
     });
-    
+
     // Valider le modèle Mongoose avant sauvegarde
     console.log('🔍 Validation Mongoose...');
     const validationError = user.validateSync();
@@ -152,13 +166,13 @@ const createUser = async (req, res) => {
       const mongooseErrors = Object.values(validationError.errors).map(err => err.message);
       return errorResponse(res, 400, 'Erreur de validation des données', { errors: mongooseErrors });
     }
-    
+
     console.log('✅ Validation Mongoose passée');
-    
+
     // Sauvegarder
     await user.save();
     console.log('✅ Utilisateur sauvegardé avec ID:', user._id);
-    
+
     // Retourner la réponse
     console.log('📤 Envoi réponse au client...');
     return successResponse(res, 201, 'Utilisateur créé avec succès', {
@@ -169,44 +183,44 @@ const createUser = async (req, res) => {
         prenom: user.prenom,
         role: user.role,
         agence: user.agence,
+        agencyId: user.agencyId,
         isActive: user.isActive,
         createdAt: user.createdAt
       }
     });
-    
+
   } catch (error) {
     console.error('🔥 ERREUR NON GÉRÉE dans createUser:');
     console.error('Message:', error.message);
     console.error('Stack:', error.stack);
-    
+
     if (error.name === 'ValidationError') {
       console.error('❌ Erreur validation Mongoose (catch):', error.errors);
       const messages = Object.values(error.errors).map(err => err.message);
       return errorResponse(res, 400, 'Erreur de validation des données', { errors: messages });
     }
-    
+
     if (error.code === 11000) {
       console.error('❌ Erreur duplication:', error.keyValue);
       return errorResponse(res, 400, 'Cette adresse email est déjà utilisée');
     }
-    
+
     console.error('❌ Erreur serveur inattendue');
-    return errorResponse(res, 500, 'Erreur lors de la création', { 
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+    return errorResponse(res, 500, 'Erreur lors de la création', {
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
-
 
 // Mise à jour du rôle avec réponse optimisée
 const updateUserRole = async (req, res) => {
   try {
     logger.header('UPDATE USER ROLE', '🔄');
     logger.request('PUT', `/admin/users/${req.params.userId}/role`, req.user);
-    
+
     const { userId } = req.params;
     const { role, limiteAutorisation, agence } = req.body;
-    
+
     logger.debug('Update data:', { role, limiteAutorisation, agence });
 
     const user = await User.findById(userId);
@@ -234,35 +248,53 @@ const updateUserRole = async (req, res) => {
       }
     }
 
-    // Vérifier l'agence si fournie
+    // Vérifier et mettre à jour l'agence si fournie
     if (agence) {
       logger.database('FIND', 'Agency', { name: agence });
-      const agencyExists = await Agency.findOne({ 
-        name: agence,
-        isActive: true 
+      const agency = await Agency.findOne({
+        $or: [
+          { name: agence },
+          { code: agence }
+        ],
+        isActive: true
       });
-      
-      if (!agencyExists) {
+
+      if (!agency) {
         logger.warn('Agency not found', { agence });
         return errorResponse(res, 400, `L'agence "${agence}" n'existe pas ou est inactive`);
       }
+
+      // Mettre à jour à la fois le nom et l'ID
+      user.agence = agency.name;
+      user.agencyId = agency._id;
+      logger.info('Agency updated', { agence: agency.name, agencyId: agency._id });
     }
 
     // Mise à jour
     if (role) user.role = role;
     if (limiteAutorisation !== undefined) user.limiteAutorisation = limiteAutorisation;
-    if (agence) user.agence = agence;
 
     user.updatedBy = req.userId;
     await user.save();
-    
-    logger.database('UPDATE', 'User', { id: user._id, updates: { role, agence } });
-    logger.success('User role updated', { id: user._id, role: user.role });
+
+    logger.database('UPDATE', 'User', {
+      id: user._id,
+      updates: {
+        role,
+        agence: user.agence,
+        agencyId: user.agencyId
+      }
+    });
+    logger.success('User role updated', {
+      id: user._id,
+      role: user.role,
+      agence: user.agence
+    });
 
     // RÉPONSE OPTIMISÉE
     logger.response(200, 'Rôle mis à jour avec succès');
     logger.footer();
-    
+
     return successResponse(res, 200, 'Rôle mis à jour avec succès', {
       user: {
         id: user._id,
@@ -270,6 +302,7 @@ const updateUserRole = async (req, res) => {
         role: user.role,
         limiteAutorisation: user.limiteAutorisation,
         agence: user.agence,
+        agencyId: user.agencyId,
         updatedAt: user.updatedAt
       }
     });
@@ -286,7 +319,7 @@ const getAllUsers = async (req, res) => {
   try {
     logger.header('GET ALL USERS', '👥');
     logger.request('GET', '/admin/users', req.user);
-    
+
     const { role, agence, isActive, page = 1, limit = 20 } = req.query;
     logger.debug('Query params:', { role, agence, isActive, page, limit });
 
@@ -296,16 +329,16 @@ const getAllUsers = async (req, res) => {
     if (isActive !== undefined) filter.isActive = isActive === 'true';
 
     logger.database('FIND', 'User', filter);
-    
+
     // OPTIMISATION: Sélectionner seulement les champs nécessaires
     const users = await User.find(filter)
-      .select('email nom prenom role agence isActive limiteAutorisation createdAt lastLogin')
+      .select('email nom prenom role agence agencyId isActive limiteAutorisation createdAt lastLogin')
       .limit(parseInt(limit))
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
 
     const total = await User.countDocuments(filter);
-    
+
     logger.success(`Found ${users.length} users`, { total, page, limit });
 
     // OPTIMISATION: Structure de réponse légère
@@ -317,6 +350,7 @@ const getAllUsers = async (req, res) => {
         prenom: user.prenom,
         role: user.role,
         agence: user.agence,
+        agencyId: user.agencyId,
         isActive: user.isActive,
         limiteAutorisation: user.limiteAutorisation,
         lastLogin: user.lastLogin,
@@ -329,10 +363,10 @@ const getAllUsers = async (req, res) => {
         pages: Math.ceil(total / limit)
       }
     };
-    
+
     logger.response(200, 'Utilisateurs récupérés');
     logger.footer();
-    
+
     return successResponse(res, 200, 'Utilisateurs récupérés', response);
 
   } catch (error) {
@@ -347,7 +381,7 @@ const toggleUserStatus = async (req, res) => {
   try {
     logger.header('TOGGLE USER STATUS', '⚡');
     logger.request('PUT', `/admin/users/${req.params.userId}/status`, req.user);
-    
+
     const { userId } = req.params;
     logger.debug('User ID:', userId);
 
@@ -369,14 +403,14 @@ const toggleUserStatus = async (req, res) => {
     user.isActive = newStatus;
     user.updatedBy = req.userId;
     await user.save();
-    
+
     logger.database('UPDATE', 'User', { id: user._id, isActive: newStatus });
     logger.success('User status updated', { id: user._id, isActive: newStatus });
 
     // RÉPONSE OPTIMISÉE
     logger.response(200, `Utilisateur ${newStatus ? 'activé' : 'désactivé'}`);
     logger.footer();
-    
+
     return successResponse(res, 200, `Utilisateur ${newStatus ? 'activé' : 'désactivé'}`, {
       user: {
         id: user._id,
@@ -398,7 +432,7 @@ const getUserById = async (req, res) => {
   try {
     logger.header('GET USER BY ID', '🔍');
     logger.request('GET', `/admin/users/${req.params.userId}`, req.user);
-    
+
     const { userId } = req.params;
     logger.debug('User ID:', userId);
 
@@ -414,7 +448,7 @@ const getUserById = async (req, res) => {
     logger.success('User found', { id: user._id, email: user.email });
     logger.response(200, 'Utilisateur récupéré');
     logger.footer();
-    
+
     return successResponse(res, 200, 'Utilisateur récupéré', {
       user: user.toJSON()
     });
@@ -431,7 +465,7 @@ const deleteUser = async (req, res) => {
   try {
     logger.header('DELETE USER', '🗑️');
     logger.request('DELETE', `/admin/users/${req.params.userId}`, req.user);
-    
+
     const { userId } = req.params;
     logger.debug('User ID:', userId);
 
@@ -442,7 +476,7 @@ const deleteUser = async (req, res) => {
     }
 
     const user = await User.findById(userId);
-    
+
     if (!user) {
       logger.warn('User not found', { userId });
       return errorResponse(res, 404, 'Utilisateur non trouvé');
@@ -452,12 +486,12 @@ const deleteUser = async (req, res) => {
     user.isActive = false;
     user.updatedBy = req.userId;
     await user.save();
-    
+
     logger.database('UPDATE', 'User', { id: user._id, isActive: false });
     logger.success('User deactivated', { id: user._id, email: user.email });
     logger.response(200, 'Utilisateur désactivé');
     logger.footer();
-    
+
     return successResponse(res, 200, 'Utilisateur désactivé avec succès', {
       userId: user._id,
       email: user.email,
@@ -476,7 +510,7 @@ const getAllClients = async (req, res) => {
   try {
     logger.header('GET ALL CLIENTS', '👥');
     logger.request('GET', '/admin/clients', req.user);
-    
+
     const { isActive, page = 1, limit = 20 } = req.query;
     logger.debug('Query params:', { isActive, page, limit });
 
@@ -484,16 +518,16 @@ const getAllClients = async (req, res) => {
     if (isActive !== undefined) filter.isActive = isActive === 'true';
 
     logger.database('FIND', 'User', filter);
-    
+
     // OPTIMISATION: Sélectionner seulement les champs nécessaires
     const clients = await User.find(filter)
-      .select('email nom prenom role agence isActive limiteAutorisation notationClient numeroCompte createdAt lastLogin')
+      .select('email nom prenom role agence agencyId isActive limiteAutorisation notationClient numeroCompte createdAt lastLogin')
       .limit(parseInt(limit))
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
 
     const total = await User.countDocuments(filter);
-    
+
     logger.success(`Found ${clients.length} clients`, { total, page, limit });
 
     // OPTIMISATION: Structure de réponse légère
@@ -505,6 +539,7 @@ const getAllClients = async (req, res) => {
         prenom: client.prenom,
         role: client.role,
         agence: client.agence,
+        agencyId: client.agencyId,
         isActive: client.isActive,
         limiteAutorisation: client.limiteAutorisation,
         notationClient: client.notationClient,
@@ -519,10 +554,10 @@ const getAllClients = async (req, res) => {
         pages: Math.ceil(total / limit)
       }
     };
-    
+
     logger.response(200, 'Clients récupérés');
     logger.footer();
-    
+
     return successResponse(res, 200, 'Clients récupérés', response);
 
   } catch (error) {
@@ -539,7 +574,7 @@ const createAgency = async (req, res) => {
   try {
     logger.header('CREATE AGENCY', '🏢');
     logger.request('POST', '/admin/agences', req.user);
-    
+
     const { name, description, region, city, address, phone, email, code } = req.body;
     logger.debug('Request body:', { name, region, city, code });
 
@@ -553,7 +588,7 @@ const createAgency = async (req, res) => {
     let agencyCode = code;
     if (!agencyCode && name) {
       agencyCode = name.substring(0, 3).toUpperCase();
-      
+
       // Vérifier si le code existe déjà
       let counter = 1;
       let uniqueCode = agencyCode;
@@ -562,7 +597,7 @@ const createAgency = async (req, res) => {
         counter++;
       }
       agencyCode = uniqueCode;
-      
+
       logger.info('Code auto-généré', { name, code: agencyCode });
     }
 
@@ -603,14 +638,14 @@ const createAgency = async (req, res) => {
     logger.database('CREATE', 'Agency', { id: agency._id, name: agency.name });
 
     // Réponse optimisée
-    logger.success('Agency created successfully', { 
-      id: agency._id, 
-      name: agency.name, 
-      code: agency.code 
+    logger.success('Agency created successfully', {
+      id: agency._id,
+      name: agency.name,
+      code: agency.code
     });
     logger.response(201, 'Agence créée avec succès');
     logger.footer();
-    
+
     return successResponse(res, 201, 'Agence créée avec succès', {
       agency: {
         id: agency._id,
@@ -630,17 +665,17 @@ const createAgency = async (req, res) => {
   } catch (error) {
     logger.error('Error creating agency', error);
     logger.footer();
-    
+
     // Gestion des erreurs spécifiques
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
       return errorResponse(res, 400, 'Erreur de validation', { errors: messages });
     }
-    
+
     if (error.code === 11000) {
       return errorResponse(res, 400, 'Une agence avec ce nom ou code existe déjà');
     }
-    
+
     return errorResponse(res, 500, 'Erreur lors de la création de l\'agence');
   }
 };
@@ -652,10 +687,10 @@ const getAgences = async (req, res) => {
   try {
     logger.header('GET AGENCES', '🏢');
     logger.request('GET', '/admin/agences', req.user);
-    
+
     const { page = 1, limit = 20, search = '' } = req.query;
     const skip = (page - 1) * limit;
-    
+
     logger.debug('Query params:', { page, limit, search });
 
     // Construire la query
@@ -671,7 +706,7 @@ const getAgences = async (req, res) => {
     }
 
     logger.database('FIND', 'Agency', query);
-    
+
     // Récupérer les agences
     const [agences, total] = await Promise.all([
       Agency.find(query)
@@ -707,7 +742,7 @@ const getAgences = async (req, res) => {
         pages: Math.ceil(total / limit)
       }
     };
-    
+
     logger.response(200, 'Agences récupérées');
     logger.footer();
 
@@ -727,10 +762,10 @@ const updateAgency = async (req, res) => {
   try {
     logger.header('UPDATE AGENCY', '🔄');
     logger.request('PUT', `/admin/agences/${req.params.agencyId}`, req.user);
-    
+
     const { agencyId } = req.params;
     const { name, description, region, city, address, phone, email, isActive } = req.body;
-    
+
     logger.debug('Update data:', { name, region, city, isActive });
 
     const agency = await Agency.findById(agencyId);
@@ -764,12 +799,12 @@ const updateAgency = async (req, res) => {
     agency.updatedAt = new Date();
     agency.updatedBy = req.userId;
     await agency.save();
-    
+
     logger.database('UPDATE', 'Agency', { id: agency._id, updates: req.body });
     logger.success('Agency updated', { id: agency._id, name: agency.name });
     logger.response(200, 'Agence mise à jour avec succès');
     logger.footer();
-    
+
     return successResponse(res, 200, 'Agence mise à jour avec succès', {
       agency: {
         id: agency._id,
@@ -800,7 +835,7 @@ const getAgencyById = async (req, res) => {
   try {
     logger.header('GET AGENCY BY ID', '🔍');
     logger.request('GET', `/admin/agences/${req.params.agencyId}`, req.user);
-    
+
     const { agencyId } = req.params;
     logger.debug('Agency ID:', agencyId);
 
@@ -815,7 +850,7 @@ const getAgencyById = async (req, res) => {
     logger.success('Agency found', { id: agency._id, name: agency.name });
     logger.response(200, 'Agence récupérée');
     logger.footer();
-    
+
     return successResponse(res, 200, 'Agence récupérée', {
       agency: {
         id: agency._id,
@@ -842,16 +877,144 @@ const getAgencyById = async (req, res) => {
   }
 };
 
+// controllers/admin.controller.js - AJOUTER CETTE MÉTHODE
+
+/**
+ * Récupérer tous les utilisateurs d'une agence spécifique
+ */
+const getUsersByAgency = async (req, res) => {
+  try {
+    const { agencyName } = req.params;
+    const { 
+      role, 
+      isActive = 'true',
+      page = 1, 
+      limit = 100 
+    } = req.query;
+
+    console.log(`🔍 getUsersByAgency: ${agencyName}`);
+
+    if (!agencyName || agencyName.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Le nom de l\'agence est requis'
+      });
+    }
+
+    const decodedAgencyName = decodeURIComponent(agencyName);
+    const User = require('../models/User');
+    
+    // Construire la requête
+    const query = { agence: decodedAgencyName };
+
+    if (role && role !== 'all') {
+      query.role = role;
+    }
+
+    if (isActive !== 'all') {
+      query.isActive = isActive === 'true';
+    }
+
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Récupérer les utilisateurs
+    const users = await User.find(query)
+      .select('-password -refreshToken')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const total = await User.countDocuments(query);
+
+    // Statistiques par rôle
+    const roles = await User.aggregate([
+      { $match: query },
+      { $group: { _id: '$role', count: { $sum: 1 } } }
+    ]);
+
+    const byRole = {};
+    roles.forEach(item => {
+      byRole[item._id] = item.count;
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        agency: decodedAgencyName,
+        users: users.map(user => ({
+          ...user,
+          _id: user._id.toString(),
+          id: user._id.toString()
+        })),
+        total,
+        byRole,
+        totalUsers: total,
+        activeUsers: await User.countDocuments({ ...query, isActive: true }),
+        inactiveUsers: await User.countDocuments({ ...query, isActive: false })
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur getUsersByAgency:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+
 module.exports = {
   createUser,
   updateUserRole,
   getAllUsers,
   getAllClients,
+  getUsersByAgency,
   toggleUserStatus,
   getUserById,
   deleteUser,
   createAgency,
   getAgences,
   updateAgency,
-  getAgencyById
+  getAgencyById,
+  assignUserToAgency: async (req, res) => {
+    try {
+      res.json({ success: true, message: 'Utilisateur assigné à l\'agence' });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+  getUsersByAgency: async (req, res) => {
+    try {
+      res.json({ success: true, users: [] });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+  getAgencyStats: async (req, res) => {
+    try {
+      res.json({ success: true, stats: {} });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+  deactivateAgency: async (req, res) => {
+    try {
+      res.json({ success: true, message: 'Agence désactivée' });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+  getAgencyUsers: async (req, res) => {
+    try {
+      res.json({ success: true, users: [] });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
 };

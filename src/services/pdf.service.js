@@ -14,7 +14,7 @@ class PDFService {
    */
   static async genererRapportDemande(demandeId) {
     const demande = await DemandeForçage.findById(demandeId)
-      .populate('clientId', 'nom prenom email numeroCompte')
+      .populate('clientId', 'nom prenom email numeroCompte cni') // ✅ Ajouté cni
       .populate('conseillerId', 'nom prenom email')
       .populate('validePar_rm.userId', 'nom prenom')
       .populate('validePar_dce.userId', 'nom prenom')
@@ -29,7 +29,8 @@ class PDFService {
         // Créer le document PDF
         const doc = new PDFDocument({
           size: 'A4',
-          margins: { top: 50, bottom: 50, left: 50, right: 50 }
+          margins: { top: 50, bottom: 50, left: 50, right: 50 },
+          bufferPages: true // ✅ CRITIQUE: Permet switchToPage
         });
 
         // Stream vers buffer
@@ -64,7 +65,8 @@ class PDFService {
         doc.fontSize(10).fillColor('#000');
         this.ajouterLigne(doc, 'Nom', `${demande.clientId.prenom} ${demande.clientId.nom}`);
         this.ajouterLigne(doc, 'Email', demande.clientId.email);
-        this.ajouterLigne(doc, 'Numéro de compte', demande.clientId.numeroCompte || 'N/A');
+        this.ajouterLigne(doc, 'CNI', demande.clientId.cni || demande.clientCni || 'N/A'); // ✅ Ajouté CNI
+        this.ajouterLigne(doc, 'Numéro de compte', demande.clientId.numeroCompte || demande.clientNumeroCompte || 'N/A');
         this.ajouterLigne(doc, 'Notation', demande.notationClient);
 
         // ========== DÉTAILS FINANCIERS ==========

@@ -1,9 +1,9 @@
 // routes/admin.routes.js
 const express = require('express');
 const router = express.Router();
-const adminController = require('../controllers/admin.controller');
-const { authenticate, requireAdmin } = require('../middlewares/auth.middleware');
-const schedulerRoutes = require('./scheduler.routes');
+const adminController = require('../../controllers/admin.controller');
+const { authenticate, requireAdmin } = require('../../middlewares/auth.middleware');
+const schedulerRoutes = require('../scheduler.routes');
 
 // Toutes les routes admin nécessitent l'authentification admin
 router.use(authenticate);
