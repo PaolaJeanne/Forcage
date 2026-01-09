@@ -421,15 +421,15 @@ DemandeForçageSchema.methods.canBeProcessedBy = function (user) {
 
     case 'conseiller':
       return [STATUTS_DEMANDE.EN_ATTENTE_CONSEILLER, STATUTS_DEMANDE.EN_ETUDE_CONSEILLER].includes(currentStatus) &&
-        (this.conseillerId?.toString() === user.id.toString() || user.agence === this.agenceId);
+        (this.conseillerId?.toString() === user.id.toString() || this.agencyId?.toString() === user.agencyId?.toString());
 
     case 'rm':
       return currentStatus === STATUTS_DEMANDE.EN_ATTENTE_RM &&
-        user.agence === this.agenceId;
+        this.agencyId?.toString() === user.agencyId?.toString();
 
     case 'dce':
       return currentStatus === STATUTS_DEMANDE.EN_ATTENTE_DCE &&
-        user.region === this.agenceId;
+        this.agencyId?.toString() === user.agencyId?.toString();
 
     case 'adg':
       return currentStatus === STATUTS_DEMANDE.EN_ATTENTE_ADG;

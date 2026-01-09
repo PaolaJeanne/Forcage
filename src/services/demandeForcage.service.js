@@ -55,12 +55,18 @@ class DemandeForçageService {
       // Appliquer les filtres
       if (filters.clientId) query.clientId = filters.clientId;
       if (filters.conseillerId) query.conseillerId = filters.conseillerId;
-      if (filters.agenceId) query.agenceId = filters.agenceId;
+      if (filters.agencyId) query.agencyId = filters.agencyId;
       if (filters.statut) query.statut = filters.statut;
       if (filters.scoreRisque) query.scoreRisque = filters.scoreRisque;
       if (filters.typeOperation) query.typeOperation = filters.typeOperation;
       if (filters.priorite) query.priorite = filters.priorite;
       if (filters.createdAt) query.createdAt = filters.createdAt;
+
+      // ✅ CORRECTION: Gérer le filtre $or pour les conseillers
+      if (filters.$or) {
+        query.$or = filters.$or;
+        logger.debug('OR filter applied for conseiller', { $or: filters.$or });
+      }
 
       if (filters.search) {
         query.$or = [
@@ -80,6 +86,7 @@ class DemandeForçageService {
           .sort(sort)
           .skip(skip)
           .limit(limit)
+          .select('+clientNom +clientPrenom +clientEmail +clientCni') // ✅ S'assurer que les champs sont inclus
           .lean(),
         DemandeForçage.countDocuments(query)
       ]);

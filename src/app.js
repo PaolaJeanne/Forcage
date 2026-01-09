@@ -1,5 +1,7 @@
 // app.js - VERSION CORRIGÉE AVEC SCHEDULER ET CHARGEMENT DE ROUTES FONCTIONNEL
-console.log('>>> [DEBUG] Démarrage du script app.js...');
+const logger = require('./utils/logger.util');
+
+logger.info('Démarrage du script app.js');
 
 const express = require('express');
 const cors = require('cors');
@@ -12,14 +14,14 @@ const http = require('http');
 const socketIo = require('socket.io');
 const fs = require('fs');
 
-console.log('>>> [DEBUG] Modules natifs chargés.');
+logger.info('Modules natifs chargés');
 
 let config;
 try {
   config = require('./config/env');
-  console.log('>>> [DEBUG] Configuration chargée (env:', config.env, ', port:', config.port, ')');
+  logger.info(`Configuration chargée (env: ${config.env}, port: ${config.port})`);
 } catch (error) {
-  console.error('!!! [ERREUR CRITIQUE] Impossible de charger ./config/env :', error);
+  logger.error('Impossible de charger ./config/env', error);
   process.exit(1);
 }
 
@@ -35,7 +37,7 @@ const server = http.createServer(app);
 // ==========================================
 // Configuration WebSocket
 // ==========================================
-console.log('>>> [DEBUG] Configuration WebSocket...');
+logger.info('Configuration WebSocket');
 const io = socketIo(server, {
   cors: {
     origin: config.env === 'production'
@@ -55,62 +57,62 @@ global.io = io;
 // ==========================================
 async function startServer() {
   try {
-    console.log('>>> [DEBUG] Tentative de connexion MongoDB...');
+    logger.info('Tentative de connexion MongoDB');
 
     // Connexion à MongoDB
     await connectDB();
-    console.log('>>> [DEBUG] MongoDB connecté avec succès.');
+    logger.success('MongoDB connecté avec succès');
 
     // Initialiser le scheduler
     if (process.env.ENABLE_SCHEDULER !== 'false') {
       try {
-        console.log('>>> [DEBUG] Initialisation du SchedulerService...');
+        logger.info('Initialisation du SchedulerService');
         await SchedulerService.initialize();
-        console.log('>>> [DEBUG] Scheduler initialisé.');
+        logger.success('Scheduler initialisé');
       } catch (error) {
-        console.error('!!! [ERREUR] Initialisation du scheduler:', error);
+        logger.error('Initialisation du scheduler', error);
         // Ne pas arrêter le serveur si le scheduler échoue
       }
     } else {
-      console.log('>>> [DEBUG] Scheduler désactivé (ENABLE_SCHEDULER=false)');
+      logger.info('Scheduler désactivé (ENABLE_SCHEDULER=false)');
     }
 
     // Initialiser les templates de notifications
     try {
-      console.log('>>> [DEBUG] Initialisation templates notifications...');
+      logger.info('Initialisation templates notifications');
       const NotificationTemplateService = require('./services/notificationTemplate.service');
       await NotificationTemplateService.initialiserTemplatesParDefaut();
-      console.log('>>> [DEBUG] Templates notifications OK.');
+      logger.success('Templates notifications OK');
     } catch (error) {
-      console.error('!!! [ERREUR] Initialisation templates notifications :', error);
+      logger.error('Initialisation templates notifications', error);
     }
 
     // Configurer les hooks de notifications
     try {
-      console.log('>>> [DEBUG] Configuration hooks notifications...');
+      logger.info('Configuration hooks notifications');
       const { setupDemandeHooks } = require('./hooks/notification.hooks');
       const DemandeForçage = require('./models/DemandeForçage');
 
       setupDemandeHooks(DemandeForçage);
-      console.log('>>> [DEBUG] Hooks notifications OK.');
+      logger.success('Hooks notifications OK');
     } catch (error) {
-      console.error('!!! [ERREUR] Configuration hooks notifications :', error);
+      logger.error('Configuration hooks notifications', error);
     }
 
     // Démarrage serveur
     const PORT = config.port || 5000;
 
     server.listen(PORT, '0.0.0.0', () => {
-      console.log('===================================================');
-      console.log(`>>> [INFO] SERVER RUNNING ON PORT ${PORT}`);
-      console.log(`>>> [INFO] Environment: ${config.env}`);
-      console.log(`>>> [INFO] API URL: http://localhost:${PORT}`);
-      console.log('>>> [INFO] Scheduler:', process.env.ENABLE_SCHEDULER !== 'false' ? 'ACTIF' : 'INACTIF');
-      console.log('===================================================');
+      logger.header('SERVER RUNNING', '🚀');
+      logger.info(`Port: ${PORT}`);
+      logger.info(`Environment: ${config.env}`);
+      logger.info(`API URL: http://localhost:${PORT}`);
+      logger.info(`Scheduler: ${process.env.ENABLE_SCHEDULER !== 'false' ? 'ACTIF' : 'INACTIF'}`);
+      logger.footer();
     });
 
   } catch (error) {
-    console.error('❌ Erreur démarrage:', error);
+    logger.error('Erreur démarrage', error);
     process.exit(1);
   }
 }
@@ -131,12 +133,40 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: config.env === 'production'
-    ? ['https://votre-domaine.com', 'https://www.votre-domaine.com']
-    : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173'
+    ];
+
+    // En développement, autoriser aussi les IPs locales (192.168.x.x)
+    const isLocalNetwork = /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin);
+
+    if (config.env === 'production') {
+      const prodOrigins = ['https://votre-domaine.com', 'https://www.votre-domaine.com'];
+      if (prodOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    } else {
+      // En dev : localhost OU réseau local
+      if (allowedOrigins.indexOf(origin) !== -1 || isLocalNetwork) {
+        callback(null, true);
+      } else {
+        console.warn('⚠️ Origin blocké par CORS:', origin);
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400
 }));
 
 // Rate limiting
@@ -171,6 +201,15 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ==========================================
+// Request Logging Middleware
+// ==========================================
+app.use((req, res, next) => {
+  logger.request(req.method, req.path, req.user);
+  logger.debug('Authorization', req.headers.authorization ? '✅ Present' : '❌ Missing');
+  next();
+});
+
+// ==========================================
 // Logging HTTP & Compression
 // ==========================================
 if (config.env === 'development') {
@@ -185,18 +224,18 @@ app.use(compression());
 // WebSocket Initialisation
 // ==========================================
 io.on('connection', (socket) => {
-  console.log('>>> [DEBUG] Nouvelle connexion WebSocket:', socket.id);
+  logger.info(`Nouvelle connexion WebSocket: ${socket.id}`);
 
   // Joindre la salle utilisateur si authentifié
   socket.on('authenticate', (userId) => {
     if (userId) {
-      console.log('>>> [DEBUG] Socket authentifié UserID:', userId);
+      logger.debug(`Socket authentifié UserID: ${userId}`);
       socket.join(`user:${userId}`);
     }
   });
 
   socket.on('disconnect', (reason) => {
-    console.log('>>> [DEBUG] WebSocket disconnect:', socket.id, 'raison:', reason);
+    logger.info(`WebSocket disconnect: ${socket.id} (raison: ${reason})`);
   });
 });
 
@@ -204,7 +243,7 @@ io.on('connection', (socket) => {
 // TEST SIMPLE POUR DÉMARRER
 // ==========================================
 app.get('/api/test', (req, res) => {
-  console.log('>>> [DEBUG] Appel GET /api/test');
+  logger.debug('Appel GET /api/test');
   res.json({
     success: true,
     message: 'API fonctionnelle',
@@ -215,6 +254,27 @@ app.get('/api/test', (req, res) => {
       auth: '/api/v1/auth',
       health: '/health'
     }
+  });
+});
+
+// ==========================================
+// DEBUG ENDPOINT - Token Test
+// ==========================================
+app.get('/api/debug/token-test', (req, res) => {
+  const authHeader = req.headers.authorization;
+  logger.header('DEBUG TOKEN TEST', '🔍');
+  logger.debug('Authorization Header', authHeader ? '✅ Present' : '❌ Missing');
+  if (authHeader) {
+    logger.debug('Header Value', authHeader.substring(0, 50) + '...');
+  }
+  logger.footer();
+
+  res.json({
+    success: true,
+    message: 'Token test endpoint',
+    authHeaderPresent: !!authHeader,
+    authHeaderValue: authHeader ? authHeader.substring(0, 50) + '...' : null,
+    headers: req.headers
   });
 });
 
@@ -270,14 +330,14 @@ app.use('/api/v1', apiRoutes);
 // ==========================================
 setTimeout(() => {
   try {
-    console.log('>>> [DEBUG] Chargement sockets additionnels...');
+    logger.info('Chargement sockets additionnels');
 
     // WebSocket pour les notifications
     const notificationSocketPath = path.join(__dirname, 'websocket/notification.socket.js');
     if (fs.existsSync(notificationSocketPath)) {
       const notificationSocket = require(notificationSocketPath);
       notificationSocket(io);
-      console.log('    ✅ Notification Socket chargé.');
+      logger.success('Notification Socket chargé');
     }
 
     // WebSocket pour le chat
@@ -285,10 +345,10 @@ setTimeout(() => {
     if (fs.existsSync(chatSocketPath)) {
       const chatSocket = require(chatSocketPath);
       chatSocket(io);
-      console.log('    ✅ Chat Socket chargé.');
+      logger.success('Chat Socket chargé');
     }
   } catch (error) {
-    console.error('!!! [ERREUR] Chargement sockets :', error);
+    logger.error('Chargement sockets', error);
   }
 }, 1000);
 
@@ -302,11 +362,11 @@ app.use(errorHandler);
 // Gestion des erreurs non capturées
 // ==========================================
 process.on('unhandledRejection', (err) => {
-  console.error('!!! [UNHANDLED REJECTION]', err);
+  logger.error('UNHANDLED REJECTION', err);
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('!!! [UNCAUGHT EXCEPTION]', err);
+  logger.error('UNCAUGHT EXCEPTION', err);
   process.exit(1);
 });
 
@@ -314,7 +374,7 @@ process.on('uncaughtException', (err) => {
 // Lancement du serveur
 // ==========================================
 startServer().catch(error => {
-  console.error('!!! [ERREUR FATALE] Échec du démarrage du serveur:', error);
+  logger.error('Échec du démarrage du serveur', error);
   process.exit(1);
 });
 
@@ -322,39 +382,39 @@ startServer().catch(error => {
 // Graceful shutdown
 // ==========================================
 const shutdown = async (signal) => {
-  console.log(`>>> [INFO] Signal ${signal} received. Closing server...`);
+  logger.info(`Signal ${signal} received. Closing server...`);
 
   // Arrêter le scheduler si actif
   if (process.env.ENABLE_SCHEDULER !== 'false' && SchedulerService) {
     try {
-      console.log('>>> [INFO] Arrêt du scheduler...');
+      logger.info('Arrêt du scheduler');
       await SchedulerService.shutdown();
-      console.log('>>> [INFO] Scheduler arrêté.');
+      logger.success('Scheduler arrêté');
     } catch (error) {
-      console.error('!!! [ERREUR] Arrêt du scheduler:', error);
+      logger.error('Arrêt du scheduler', error);
     }
   }
 
   // Fermer les connexions WebSocket
   io.close(() => {
-    console.log('>>> [INFO] WebSockets closed.');
+    logger.success('WebSockets closed');
   });
 
   // Fermer le serveur HTTP
   server.close(() => {
-    console.log('>>> [INFO] HTTP server closed.');
+    logger.success('HTTP server closed');
 
     // Fermer la connexion MongoDB
     const mongoose = require('mongoose');
     mongoose.connection.close(false, () => {
-      console.log('>>> [INFO] MongoDB connection closed.');
+      logger.success('MongoDB connection closed');
       process.exit(0);
     });
   });
 
   // Timeout forcé après 10 secondes
   setTimeout(() => {
-    console.error('!!! [WARN] Forced shutdown after timeout.');
+    logger.warn('Forced shutdown after timeout');
     process.exit(1);
   }, 10000);
 };

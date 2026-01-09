@@ -1,4 +1,8 @@
-// src/constants/roles.js - VERSION COMPLÈTE AVEC WORKFLOW RÉEL
+/**
+ * src/constants/roles.js - Gestion complète des rôles et permissions
+ * VERSION CORRIGÉE ET BIEN APPLIQUÉE
+ */
+
 module.exports = {
   // ========== RÔLES UTILISATEURS ==========
   ROLES: {
@@ -30,29 +34,29 @@ module.exports = {
   // ========== STATUTS DEMANDE (WORKFLOW RÉEL) ==========
   STATUTS_DEMANDE: {
     // Phase client
-    BROUILLON: 'BROUILLON',           // En cours de rédaction
-    ENVOYEE: 'ENVOYEE',               // Soumise par client
-
+    BROUILLON: 'BROUILLON',                    // En cours de rédaction
+    ENVOYEE: 'ENVOYEE',                        // Soumise par client
+    
     // Phase conseiller
     EN_ATTENTE_CONSEILLER: 'EN_ATTENTE_CONSEILLER', // À traiter par conseiller
     EN_ETUDE_CONSEILLER: 'EN_ETUDE_CONSEILLER',     // En cours d'étude
-
+    
     // Phase hiérarchique
     EN_ATTENTE_RM: 'EN_ATTENTE_RM',     // Remontée au Responsable d'Agence
     EN_ATTENTE_DCE: 'EN_ATTENTE_DCE',   // Remontée au Directeur Commercial
     EN_ATTENTE_ADG: 'EN_ATTENTE_ADG',   // Remontée à l'ADG
-
+    
     // Phase analyse risques
     EN_ANALYSE_RISQUES: 'EN_ANALYSE_RISQUES', // Service risques
-
+    
     // Décision
     APPROUVEE: 'APPROUVEE',             // Validée
     REJETEE: 'REJETEE',                 // Refusée
-
+    
     // Exécution
     DECAISSEE: 'DECAISSEE',             // Fonds débloqués
     EN_SUIVI: 'EN_SUIVI',               // En cours de suivi
-
+    
     // Clôture
     REGULARISEE: 'REGULARISEE',         // Remboursée
     ANNULEE: 'ANNULEE'                  // Annulée par le client
@@ -65,18 +69,18 @@ module.exports = {
       ENVOYEE: ['ANNULEE']
     },
     conseiller: {
-      EN_ATTENTE_CONSEILLER: ['EN_ETUDE_CONSEILLER', 'RETOURNER'],
-      EN_ETUDE_CONSEILLER: ['EN_ATTENTE_RM', 'EN_ANALYSE_RISQUES', 'REJETEE', 'RETOURNER']
+      EN_ATTENTE_CONSEILLER: ['EN_ETUDE_CONSEILLER', 'REJETEE'],
+      EN_ETUDE_CONSEILLER: ['EN_ATTENTE_RM', 'EN_ANALYSE_RISQUES', 'REJETEE']
     },
     rm: {
-      EN_ATTENTE_RM: ['EN_ATTENTE_DCE', 'APPROUVEE', 'REJETEE', 'RETOURNER'],
-      EN_ETUDE_CONSEILLER: ['EN_ATTENTE_RM', 'EN_ANALYSE_RISQUES', 'REJETEE', 'RETOURNER']
+      EN_ATTENTE_RM: ['EN_ATTENTE_DCE', 'APPROUVEE', 'REJETEE'],
+      EN_ETUDE_CONSEILLER: ['EN_ATTENTE_RM', 'EN_ANALYSE_RISQUES', 'REJETEE']
     },
     dce: {
-      EN_ATTENTE_DCE: ['EN_ATTENTE_ADG', 'APPROUVEE', 'REJETEE', 'RETOURNER']
+      EN_ATTENTE_DCE: ['EN_ATTENTE_ADG', 'APPROUVEE', 'REJETEE']
     },
     adg: {
-      EN_ATTENTE_ADG: ['APPROUVEE', 'REJETEE', 'RETOURNER', 'EN_ANALYSE_RISQUES']
+      EN_ATTENTE_ADG: ['APPROUVEE', 'REJETEE', 'EN_ANALYSE_RISQUES']
     },
     risques: {
       EN_ANALYSE_RISQUES: ['APPROUVEE', 'REJETEE']
@@ -86,26 +90,26 @@ module.exports = {
       EN_ANALYSE_RISQUES: ['APPROUVEE', 'REJETEE']
     },
     admin: {
-      '*': ['APPROUVEE', 'REJETEE', 'ANNULEE', 'DECAISSEE', 'REGULARISEE']
+      '*': ['APPROUVEE', 'REJETEE', 'ANNULEE', 'DECAISSEE', 'REGULARISEE', 'EN_SUIVI']
     }
   },
 
   // ========== ACTIONS POSSIBLES ==========
   ACTIONS_DEMANDE: {
     // Client
-    SOUMETTRE: 'SOUMETTRE',   // Soumettre une demande
-    ANNULER: 'ANNULER',       // Annuler sa demande
-
+    SOUMETTRE: 'SOUMETTRE',       // Soumettre une demande
+    ANNULER: 'ANNULER',           // Annuler sa demande
+    
     // Traitement
     PRENDRE_EN_CHARGE: 'PRENDRE_EN_CHARGE', // Prendre en charge le dossier
-    VALIDER: 'VALIDER',       // Approuver à un niveau
-    REJETER: 'REJETER',       // Rejeter à un niveau
-    REMONTER: 'REMONTER',     // Remonter au niveau supérieur
-    RETOURNER: 'RETOURNER',   // Retourner pour complément
-
+    VALIDER: 'VALIDER',           // Approuver à un niveau
+    REJETER: 'REJETER',           // Rejeter à un niveau
+    REMONTER: 'REMONTER',         // Remonter au niveau supérieur
+    RETOURNER: 'RETOURNER',       // Retourner pour complément
+    
     // Exécution
-    DECAISSER: 'DECAISSER',   // Débloquer les fonds
-    REGULARISER: 'REGULARISER' // Marquer comme remboursée
+    DECAISSER: 'DECAISSER',       // Débloquer les fonds
+    REGULARISER: 'REGULARISER'    // Marquer comme remboursée
   },
 
   // ========== NOTATIONS CLIENT ==========
@@ -145,18 +149,16 @@ module.exports = {
     AUTRE: 'AUTRE'
   },
 
-  // ========== PERMISSIONS (GARDÉES POUR COMPATIBILITÉ) ==========
+  // ========== PERMISSIONS PAR RÔLE ==========
   PERMISSIONS: {
     // ========== DEMANDES ==========
     CREATE_DEMANDE: ['client'],
     VIEW_OWN_DEMANDE: ['client', 'conseiller', 'rm', 'dce', 'adg', 'dga', 'admin', 'risques'],
     CANCEL_OWN_DEMANDE: ['client'],
-
     VALIDATE_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'admin', 'risques'],
     REFUSE_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'admin', 'risques'],
     ESCALATE_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'admin'],
     PROCESS_DEMANDE: ['conseiller', 'rm', 'dce', 'adg', 'admin', 'risques'],
-
     VIEW_ALL_DEMANDES: ['dce', 'adg', 'dga', 'risques', 'admin'],
     VIEW_TEAM_DEMANDES: ['conseiller', 'rm', 'dce', 'adg', 'dga', 'admin', 'risques'],
     VIEW_AGENCY_DEMANDES: ['rm', 'dce', 'adg', 'dga', 'admin', 'risques'],
@@ -196,7 +198,13 @@ module.exports = {
     // ========== DOCUMENTS ==========
     UPLOAD_DOCUMENTS: ['client', 'conseiller', 'rm', 'dce', 'adg', 'dga', 'admin'],
     VIEW_DOCUMENTS: ['client', 'conseiller', 'rm', 'dce', 'adg', 'dga', 'admin', 'risques'],
-    DELETE_DOCUMENTS: ['admin', 'dga']
+    DELETE_DOCUMENTS: ['admin', 'dga'],
+
+    // ========== KYC ==========
+    SUBMIT_KYC: ['client'],
+    VIEW_KYC: ['admin', 'dga', 'risques'],
+    APPROVE_KYC: ['admin', 'dga'],
+    REJECT_KYC: ['admin', 'dga']
   },
 
   // ========== CONFIGURATION WORKFLOW ==========
@@ -211,7 +219,7 @@ module.exports = {
     // Seuils pour analyse risques automatique
     SEUILS_ANALYSE_RISQUES: {
       MONTANT_MIN: 1000000, // 1M FCFA
-      NOTATION_MAX: 'C' // Notation C ou pire
+      NOTATION_MAX: 'C'     // Notation C ou pire
     },
 
     // Règles d'assignation automatique
@@ -231,5 +239,59 @@ module.exports = {
     
     // Rôles qui ne doivent PAS avoir d'agence
     NO_AGENCY: ['client']
+  },
+
+  // ========== FONCTIONS UTILITAIRES ==========
+  /**
+   * Vérifier si un rôle peut effectuer une action
+   */
+  canPerformAction: function(role, action) {
+    const permission = this.PERMISSIONS[action];
+    return permission && permission.includes(role);
+  },
+
+  /**
+   * Vérifier si une transition de statut est autorisée
+   */
+  isTransitionAllowed: function(role, currentStatus, newStatus) {
+    const transitions = this.TRANSITIONS_PAR_ROLE[role];
+    if (!transitions) return false;
+    
+    // Vérifier les transitions spécifiques
+    if (transitions[currentStatus]) {
+      return transitions[currentStatus].includes(newStatus);
+    }
+    
+    // Vérifier les transitions génériques (*)
+    if (transitions['*']) {
+      return transitions['*'].includes(newStatus);
+    }
+    
+    return false;
+  },
+
+  /**
+   * Obtenir la limite d'autorisation pour un rôle
+   */
+  getLimiteAutorisation: function(role) {
+    return this.LIMITES_AUTORISATION[role] || 0;
+  },
+
+  /**
+   * Vérifier si un montant est autorisé pour un rôle
+   */
+  isMontantAuthorized: function(role, montant) {
+    const limite = this.getLimiteAutorisation(role);
+    return montant <= limite;
+  },
+
+  /**
+   * Obtenir le niveau de risque basé sur la notation et le montant
+   */
+  getRiskLevel: function(notation, montant) {
+    if (notation === 'A' && montant <= 500000) return this.RISK_LEVELS.FAIBLE;
+    if (['B', 'C'].includes(notation) && montant <= 2000000) return this.RISK_LEVELS.MOYEN;
+    if (notation === 'D' && montant <= 5000000) return this.RISK_LEVELS.ELEVE;
+    return this.RISK_LEVELS.CRITIQUE;
   }
 };

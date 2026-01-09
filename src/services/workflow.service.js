@@ -5,7 +5,7 @@ const {
   LIMITES_AUTORISATION,
   HIERARCHY,
   NOTATIONS_CLIENT,
-  TRANSITIONS_AUTORISEES,
+  TRANSITIONS_PAR_ROLE,
   WORKFLOW_CONFIG
 } = require('../constants/roles');
 
@@ -15,12 +15,11 @@ class WorkflowService {
    * Déterminer le prochain statut selon l'action et le contexte
    */
   static getNextStatus(action, currentStatus, montant, userRole, notationClient, agence) {
-
-
-    // Vérifier si la transition est autorisée
-    const transitions = TRANSITIONS_AUTORISEES[currentStatus] || [];
-    if (!transitions.length) {
-
+    // Vérifier si la transition est autorisée pour ce rôle
+    const roleTransitions = TRANSITIONS_PAR_ROLE[userRole] || {};
+    const allowedTransitions = roleTransitions[currentStatus] || roleTransitions['*'] || [];
+    
+    if (!allowedTransitions.length) {
       return currentStatus;
     }
 
@@ -29,14 +28,12 @@ class WorkflowService {
       case ACTIONS_DEMANDE.SOUMETTRE:
         // Le client soumet directement vers le conseiller
         if (currentStatus === STATUTS_DEMANDE.BROUILLON) {
-
           return STATUTS_DEMANDE.EN_ATTENTE_CONSEILLER;
         }
         break;
 
       case ACTIONS_DEMANDE.ANNULER:
-        if (transitions.includes(STATUTS_DEMANDE.ANNULEE)) {
-
+        if (allowedTransitions.includes(STATUTS_DEMANDE.ANNULEE)) {
           return STATUTS_DEMANDE.ANNULEE;
         }
         break;
@@ -44,7 +41,6 @@ class WorkflowService {
       // ========== NOUVELLE ACTION: PRISE EN CHARGE ==========
       case ACTIONS_DEMANDE.PRENDRE_EN_CHARGE:
         if (currentStatus === STATUTS_DEMANDE.EN_ATTENTE_CONSEILLER && userRole === 'conseiller') {
-
           return STATUTS_DEMANDE.EN_ETUDE_CONSEILLER;
         }
         break;
@@ -54,8 +50,7 @@ class WorkflowService {
         return this.handleValidation(currentStatus, montant, userRole, notationClient, agence);
 
       case ACTIONS_DEMANDE.REJETER:
-        if (transitions.includes(STATUTS_DEMANDE.REJETEE)) {
-
+        if (allowedTransitions.includes(STATUTS_DEMANDE.REJETEE)) {
           return STATUTS_DEMANDE.REJETEE;
         }
         break;
@@ -428,9 +423,10 @@ class WorkflowService {
   /**
    * Vérifier si la transition est autorisée
    */
-  static isTransitionAllowed(fromStatus, toStatus) {
-    const transitions = TRANSITIONS_AUTORISEES[fromStatus] || [];
-    return transitions.includes(toStatus);
+  static isTransitionAllowed(fromStatus, toStatus, userRole) {
+    const roleTransitions = TRANSITIONS_PAR_ROLE[userRole] || {};
+    const allowedTransitions = roleTransitions[fromStatus] || roleTransitions['*'] || [];
+    return allowedTransitions.includes(toStatus);
   }
 
   /**

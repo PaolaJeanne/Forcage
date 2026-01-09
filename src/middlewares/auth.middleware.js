@@ -13,13 +13,16 @@ const authenticate = async (req, res, next) => {
     console.log('🔐 [AUTHENTICATE] Début de l\'authentification');
     console.log('📍 Route:', req.method, req.path);
     console.log('⏰ Timestamp:', new Date().toISOString());
-    
+
     const authHeader = req.headers.authorization;
     console.log('🔐 [AUTHENTICATE] Authorization header:', authHeader ? '✅ Présent' : '❌ Manquant');
+    console.log('📋 Tous les headers:', JSON.stringify(req.headers, null, 2));
 
     if (!authHeader) {
       console.error('❌ [AUTHENTICATE] ERREUR: Token manquant');
       console.log('📋 Headers reçus:', Object.keys(req.headers));
+      console.log('📋 Origin:', req.headers.origin);
+      console.log('📋 Referer:', req.headers.referer);
       return errorResponse(res, 401, 'Token manquant');
     }
 
@@ -40,7 +43,7 @@ const authenticate = async (req, res, next) => {
 
     console.log('🔍 [AUTHENTICATE] Décodage du token...');
     const user = getUserFromToken(token);
-    
+
     if (!user) {
       console.error('❌ [AUTHENTICATE] ERREUR: Token invalide ou expiré');
       console.log('📋 Raison: getUserFromToken retourna null');
@@ -64,7 +67,7 @@ const authenticate = async (req, res, next) => {
 
     // ✅ CORRECTION CRITIQUE - Assurer que user.id existe
     const userId = user._id || user.id || user.userId;
-    
+
     if (!userId) {
       console.error('❌ [AUTHENTICATE] ERREUR: Token mal formé - Pas d\'ID utilisateur');
       console.log('📋 Objet user:', JSON.stringify(user, null, 2));
@@ -80,7 +83,7 @@ const authenticate = async (req, res, next) => {
       agencyId: user.agencyId || null, // Assurer agencyId est défini
       agence: user.agence || null       // Assurer agence est défini
     };
-    
+
     req.userId = userId;
     req.userRole = user.role;
     req.token = token;
@@ -335,7 +338,7 @@ const canAuthorize = (req, res, next) => {
 function checkAmountLimit(req, res, next, montant) {
   console.log('💰 checkAmountLimit: Montant:', montant);
   console.log('💰 checkAmountLimit: Limite utilisateur:', req.user.limiteAutorisation);
-  
+
   // Vérifier avec PermissionHelper
   if (!PermissionHelper.canAuthorizeMontant(req.user.role, montant)) {
     console.error('❌ checkAmountLimit: Limite dépassée');
@@ -373,12 +376,12 @@ const sameAgency = async (req, res, next) => {
 
     const demandeId = req.params.id || req.body.demandeId;
     console.log('📋 [SAME_AGENCY] Demande ID:', demandeId);
-    
+
     if (!demandeId) {
       console.error('❌ [SAME_AGENCY] ERREUR: ID demande manquant');
       return errorResponse(res, 400, 'ID demande requis');
     }
-    
+
     const DemandeForçage = require('../models/DemandeForçage');
 
     const demande = await DemandeForçage.findById(demandeId)
@@ -411,7 +414,7 @@ const sameAgency = async (req, res, next) => {
     // Vérification par nom d'agence (fallback)
     const userAgence = req.user.agence;
     const demandeAgence = demande.agence || demande.clientId?.agence;
-    
+
     if (userAgence && demandeAgence && userAgence === demandeAgence) {
       console.log('✅ [SAME_AGENCY] Nom d\'agence correspond - Accès accordé');
       console.log('='.repeat(80) + '\n');

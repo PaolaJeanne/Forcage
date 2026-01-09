@@ -1,93 +1,201 @@
-// src/models/User.js - VERSION CORRIGÉE
+// backend/models/User.js - VERSION COMPLÈTE
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { ROLES } = require('../constants/roles');
 
 const userSchema = new mongoose.Schema({
+  // === INFORMATIONS DE BASE ===
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true,
+    index: true
+  },
+  password: {
+    type: String,
+    required: true
+  },
+  role: {
+    type: String,
+    enum: Object.values(ROLES),
+    required: true,
+    default: 'client'
+  },
+
+  // === INFORMATIONS PERSONNELLES ===
   nom: {
     type: String,
-    required: [true, 'Le nom est requis'],
-    trim: true
+    required: true
   },
   prenom: {
     type: String,
-    required: [true, 'Le prénom est requis'],
-    trim: true
-  },
-  email: {
-    type: String,
-    required: [true, 'L\'email est requis'],
-    lowercase: true,
-    trim: true
-    // RETIRÉ: index: true - Défini plus bas
-  },
-
-  password: {
-    type: String,
-    required: [true, 'Le mot de passe est requis'],
-    minlength: 6,
-    select: false
-  },
-
-  // ============ GESTION DES RÔLES ============
-  role: {
-    type: String,
-    enum: ['client', 'conseiller', 'rm', 'dce', 'adg', 'dga', 'risques', 'admin'],
-    default: 'client',
     required: true
   },
+  telephone: {
+    type: String,
+    required: false
+  },
+  dateNaissance: {
+    type: Date
+  },
+  lieuNaissance: {
+    type: String
+  },
+  nationalite: {
+    type: String,
+    default: 'Camerounaise'
+  },
+  genre: {
+    type: String,
+    enum: ['Masculin', 'Féminin', 'Autre', '']
+  },
+  situationMatrimoniale: {
+    type: String,
+    enum: ['Célibataire', 'Marié(e)', 'Divorcé(e)', 'Veuf(ve)', '']
+  },
 
-  // Limites d'autorisation (pour conseillers et responsables)
-  limiteAutorisation: {
-    type: Number,
-    default: function () {
-      switch (this.role) {
-        case 'conseiller': return 5000000;
-        case 'rm': return 10000000;
-        case 'dce': return 20000000;
-        case 'adg': return 50000000;
-        case 'dga': return 100000000;
-        case 'admin': return Infinity;
-        default: return 0;
-      }
+  // === DOCUMENTS D'IDENTITÉ ===
+  numeroCNI: {
+    type: String,
+    index: true
+  },
+  dateDelivranceCNI: {
+    type: Date
+  },
+  dateExpirationCNI: {
+    type: Date
+  },
+  lieuDelivranceCNI: {
+    type: String
+  },
+
+  // === ADRESSE ===
+  adresse: {
+    rue: String,
+    quartier: String,
+    ville: String,
+    codePostal: String,
+    pays: {
+      type: String,
+      default: 'Cameroun'
     }
   },
 
-  // Informations métier
-  telephone: {
-    type: String,
-    trim: true
+  // === INFORMATIONS PROFESSIONNELLES ===
+  profession: {
+    type: String
   },
-  cni: {
-    type: String,
-    trim: true
+  employeur: {
+    type: String
   },
+  revenuMensuel: {
+    type: Number,
+    default: 0
+  },
+  secteurActivite: {
+    type: String
+  },
+  statutEmploi: {
+    type: String,
+    enum: ['Employé', 'Indépendant', 'Chômeur', 'Retraité', 'Étudiant', '']
+  },
+
+  // === INFORMATIONS BANCAIRES ===
   numeroCompte: {
     type: String,
-    uppercase: true,
-    trim: true
-    // RETIRÉ: index: true - Défini plus bas
+    unique: true,
+    index: true
   },
-  agence: {
+  iban: {
+    type: String
+  },
+  typeCompte: {
     type: String,
-    trim: true,
-    required: function () { return ['conseiller', 'rm', 'dce'].includes(this.role); }
+    enum: ['Compte Courant', 'Compte Épargne', 'Compte Jeune', 'Compte Professionnel', '']
+  },
+  dateOuvertureCompte: {
+    type: Date,
+    default: Date.now
+  },
+  sourceFonds: {
+    type: String
+  },
+  objectifCompte: {
+    type: String
   },
 
-  // ============ RÉFÉRENCE À L'AGENCE (NOUVEAU) ============
+  // === CONTACT D'URGENCE ===
+  contactUrgence: {
+    nom: String,
+    telephone: String,
+    lien: String
+  },
+
+  // === AGENCE & RÉFÉRENCES ===
+  agence: {
+    type: String
+  },
   agencyId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Agency',
-    required: false
+    ref: 'Agency'
+  },
+  conseillerAssigné: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
 
-  // Classification client (si role = client)
+  // === DOCUMENTS FOURNIS ===
+  documentsFournis: {
+    cni: {
+      type: Boolean,
+      default: false
+    },
+    justificatifDomicile: {
+      type: Boolean,
+      default: false
+    },
+    photo: {
+      type: Boolean,
+      default: false
+    },
+    attestationTravail: {
+      type: Boolean,
+      default: false
+    }
+  },
+
+  // === SCORE & NOTATION ===
+  scoreCredit: {
+    type: Number,
+    default: 500
+  },
   classification: {
     type: String,
-    enum: ['normal', 'sensible', 'restructure', 'defaut'],
+    enum: ['normal', 'premium', 'business', 'jeune'],
     default: 'normal'
   },
+  notationClient: {
+    type: String,
+    enum: ['A', 'B', 'C', 'D', 'E'],
+    default: 'C'
+  },
 
-  // Informations financières (si client)
+  // === SÉCURITÉ & CONFORMITÉ ===
+  kycValide: {
+    type: Boolean,
+    default: false
+  },
+  dateKyc: {
+    type: Date
+  },
+  listeSMP: {
+    type: Boolean,
+    default: false
+  },
+
+  // === SOLDE ET LIMITES ===
   soldeActuel: {
     type: Number,
     default: 0
@@ -96,32 +204,12 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-
-  // Scoring et notation
-  notationClient: {
-    type: String,
-    enum: ['A', 'B', 'C', 'D', 'E'],
-    default: 'C'
+  limiteAutorisation: {
+    type: Number,
+    default: 0
   },
 
-  // KYC
-  kycValide: {
-    type: Boolean,
-    default: false
-  },
-  dateKyc: Date,
-
-  // Liste spéciale (27 clients SMP)
-  listeSMP: {
-    type: Boolean,
-    default: false
-  },
-
-  // Sécurité
-  otpSecret: {
-    type: String,
-    select: false
-  },
+  // === STATUT ET SÉCURITÉ ===
   isActive: {
     type: Boolean,
     default: true
@@ -129,8 +217,60 @@ const userSchema = new mongoose.Schema({
   lastLogin: {
     type: Date
   },
+  requiresPasswordChange: {
+    type: Boolean,
+    default: false
+  },
+  loginAttempts: {
+    type: Number,
+    default: 0
+  },
+  lockUntil: {
+    type: Date
+  },
 
-  // Audit
+  // === HISTORIQUE ===
+  passwordHistory: [{
+    password: String,
+    changedAt: Date,
+    reason: String,
+    temporary: Boolean
+  }],
+  historiqueTransactions: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  }],
+
+  // === COMPTEURS ===
+  nombreTransactions: {
+    type: Number,
+    default: 0
+  },
+  montantTotalTransactions: {
+    type: Number,
+    default: 0
+  },
+
+  // === MÉTADONNÉES ===
+  metadataSecurite: {
+    dernierChangementMdp: Date,
+    tentativeConnexion: Number,
+    bloque: Boolean,
+    mfaActive: Boolean,
+    appareilsAutorises: [String]
+  },
+  preferencesCommunication: {
+    email: { type: Boolean, default: true },
+    sms: { type: Boolean, default: true },
+    notificationsApp: { type: Boolean, default: true },
+    newsletter: { type: Boolean, default: false }
+  },
+
+  // === TAGS ET NOTES ===
+  tags: [String],
+  notesInternes: String,
+
+  // === CRÉATION ET MODIFICATION ===
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -138,254 +278,283 @@ const userSchema = new mongoose.Schema({
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  }
+  },
 
+  // === TIMESTAMPS ===
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
 }, {
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  timestamps: true
 });
 
-// ============================================
-// TOUS LES INDEX DÉFINIS ICI - CENTRALISÉS
-// ============================================
-userSchema.index({ email: 1 }, { unique: true }); // Index unique sur email
-userSchema.index({ role: 1, agence: 1 }); // Recherche par rôle et agence
-userSchema.index({ role: 1, agencyId: 1 }); // Recherche par rôle et agencyId (NOUVEAU)
-userSchema.index({ agencyId: 1 }); // Recherche par agencyId (NOUVEAU)
-userSchema.index({ numeroCompte: 1 }, { unique: true, sparse: true }); // Index unique sparse
-userSchema.index({ isActive: 1 }); // Recherche par statut actif
-userSchema.index({ createdAt: -1 }); // Tri par date de création
-userSchema.index({ role: 1 }); // Recherche par rôle
-userSchema.index({ agence: 1 }); // Recherche par agence
-userSchema.index({ classification: 1 }); // Recherche par classification
-userSchema.index({ notationClient: 1 }); // Recherche par notation
-userSchema.index({ lastLogin: -1 }); // Tri par dernière connexion
-userSchema.index({ nom: 1, prenom: 1 }); // Recherche par nom/prénom
-userSchema.index({ 'fullName': 'text' }, {
-  weights: { nom: 3, prenom: 2, email: 1 },
-  name: 'UserSearchIndex'
-}); // Index texte pour la recherche
+// Index pour améliorer les performances
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ role: 1 });
+userSchema.index({ agence: 1 });
+userSchema.index({ agencyId: 1 });
+userSchema.index({ isActive: 1 });
+userSchema.index({ createdAt: -1 });
+userSchema.index({ notationClient: 1 });
+userSchema.index({ classification: 1 });
+userSchema.index({ kycValide: 1 });
 
-// ============================================
-// MIDDLEWARES
-// ============================================
+// === MIDDLEWARES ===
 
-// Hash du mot de passe avant la sauvegarde
-userSchema.pre('save', async function (next) {
-  // Ne hacher que si le password est modifié
+// Hash du mot de passe avant sauvegarde
+userSchema.pre('save', async function () {
+  // Seulement si le mot de passe a été modifié
   if (!this.isModified('password')) {
-    return nextIfExists(next);
+    this.updatedAt = new Date();
+    return;
   }
 
-  try {
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
-    nextIfExists(next);
-  } catch (error) {
-    nextIfExists(next, error);
+  // Vérifier la longueur minimale
+  if (this.password.length < 6) {
+    throw new Error('Le mot de passe doit contenir au moins 6 caractères');
   }
-});
 
-// Middleware pour les updates (findOneAndUpdate, findByIdAndUpdate)
-userSchema.pre('findOneAndUpdate', async function (next) {
-  const update = this.getUpdate();
+  // Hasher le mot de passe
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
 
-  if (update.password) {
-    try {
-      const salt = await bcrypt.genSalt(10);
-      update.password = await bcrypt.hash(update.password, salt);
-      this.setUpdate(update);
-      next();
-    } catch (error) {
-      next(error);
+  // Ajouter à l'historique
+  if (this.passwordHistory) {
+    this.passwordHistory.push({
+      password: this.password,
+      changedAt: new Date(),
+      reason: 'Changement de mot de passe',
+      temporary: false
+    });
+
+    // Garder seulement les 5 derniers mots de passe
+    if (this.passwordHistory.length > 5) {
+      this.passwordHistory = this.passwordHistory.slice(-5);
     }
-  } else {
-    next();
   }
+
+  // Mettre à jour la date
+  this.updatedAt = new Date();
 });
 
-// Middleware pour formater les données avant sauvegarde
-userSchema.pre('save', function (next) {
-  // Formater l'email en lowercase
-  if (this.isModified('email')) {
-    this.email = this.email.toLowerCase().trim();
-  }
+// === MÉTHODES D'INSTANCE ===
 
-  // Formater le numéro de compte en majuscules
-  if (this.isModified('numeroCompte') && this.numeroCompte) {
-    this.numeroCompte = this.numeroCompte.toUpperCase().trim();
-  }
-
-  // Nettoyer le téléphone
-  if (this.isModified('telephone') && this.telephone) {
-    this.telephone = this.telephone.replace(/\s/g, '');
-  }
-
-  nextIfExists(next);
-});
-
-// ============================================
-// MÉTHODES D'INSTANCE
-// ============================================
-
-// Méthode pour comparer les mots de passe (bcryptjs)
+// Comparer le mot de passe
 userSchema.methods.comparePassword = async function (candidatePassword) {
-  try {
-    return await bcrypt.compare(candidatePassword, this.password);
-  } catch (error) {
-    return false;
-  }
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Méthode pour vérifier si peut autoriser un montant
-userSchema.methods.peutAutoriser = function (montant) {
-  if (['admin', 'adg', 'dga'].includes(this.role)) {
-    return true;
-  }
-  return montant <= this.limiteAutorisation;
-};
+// Mettre à jour le profil
+userSchema.methods.updateProfile = async function (updates) {
+  const allowedFields = [
+    'nom', 'prenom', 'telephone', 'genre', 'situationMatrimoniale',
+    'adresse', 'profession', 'employeur', 'revenuMensuel',
+    'contactUrgence', 'preferencesCommunication'
+  ];
 
-// Méthode pour obtenir le prochain niveau hiérarchique
-userSchema.methods.getProchainNiveau = function () {
-  const hierarchie = {
-    'conseiller': 'rm',
-    'rm': 'dce',
-    'dce': 'adg',
-    'adg': 'dga',
-    'dga': null
-  };
-  return hierarchie[this.role] || null;
-};
+  allowedFields.forEach(field => {
+    if (updates[field] !== undefined) {
+      this[field] = updates[field];
+    }
+  });
 
-// Méthode pour activer/désactiver l'utilisateur
-userSchema.methods.toggleActive = async function () {
-  this.isActive = !this.isActive;
+  this.updatedAt = new Date();
   return await this.save();
 };
 
-// Méthode pour vérifier les permissions
-userSchema.methods.hasPermission = function (permission) {
-  const permissions = {
-    'client': ['view_own_demandes', 'create_demande', 'chat'],
-    'conseiller': ['view_all_demandes', 'validate_demande', 'chat', 'assign_demande'],
-    'rm': ['view_all_demandes', 'validate_demande', 'chat', 'escalate_demande'],
-    'dce': ['view_all_demandes', 'validate_demande', 'manage_users'],
-    'adg': ['view_all_demandes', 'final_validation', 'manage_users', 'audit'],
-    'dga': ['all_permissions'],
-    'admin': ['all_permissions'],
-    'risques': ['view_all_demandes', 'risk_analysis', 'reject_demande']
-  };
+// Soumettre le KYC
+userSchema.methods.submitKYC = async function (kycData) {
+  const kycFields = [
+    'numeroCNI', 'dateNaissance', 'lieuNaissance', 'nationalite', 'genre',
+    'situationMatrimoniale', 'adresse', 'profession', 'employeur',
+    'revenuMensuel', 'secteurActivite', 'statutEmploi', 'numeroCompte',
+    'iban', 'typeCompte', 'contactUrgence', 'documentsFournis'
+  ];
 
-  const rolePermissions = permissions[this.role] || [];
-  return rolePermissions.includes(permission) || rolePermissions.includes('all_permissions');
-};
-
-// ============================================
-// VIRTUALS
-// ============================================
-
-// Méthode pour obtenir le nom complet
-userSchema.virtual('fullName').get(function () {
-  return `${this.prenom} ${this.nom}`;
-});
-
-userSchema.virtual('initials').get(function () {
-  return `${this.prenom.charAt(0)}${this.nom.charAt(0)}`.toUpperCase();
-});
-
-userSchema.virtual('displayRole').get(function () {
-  const roleNames = {
-    'client': 'Client',
-    'conseiller': 'Conseiller',
-    'rm': 'Responsable Mission',
-    'dce': 'Directeur Centre d\'Exploitation',
-    'adg': 'Assistant Directeur Général',
-    'dga': 'Directeur Général Adjoint',
-    'admin': 'Administrateur',
-    'risques': 'Gestionnaire Risques'
-  };
-  return roleNames[this.role] || this.role;
-});
-
-// ============================================
-// MÉTHODES STATIQUES
-// ============================================
-
-// Trouver un utilisateur par email avec le mot de passe
-userSchema.statics.findByEmailWithPassword = function (email) {
-  return this.findOne({ email: email.toLowerCase() }).select('+password');
-};
-
-// Vérifier si un email existe
-userSchema.statics.emailExists = async function (email) {
-  const user = await this.findOne({ email: email.toLowerCase() });
-  return !!user;
-};
-
-// Vérifier si un numéro de compte existe
-userSchema.statics.accountNumberExists = async function (numeroCompte) {
-  const user = await this.findOne({ numeroCompte: numeroCompte.toUpperCase() });
-  return !!user;
-};
-
-// Rechercher des utilisateurs par texte
-userSchema.statics.search = function (searchTerm, filters = {}) {
-  let query = {};
-
-  if (searchTerm) {
-    query.$text = { $search: searchTerm };
-  }
-
-  if (filters.role) query.role = filters.role;
-  if (filters.agence) query.agence = filters.agence;
-  if (filters.isActive !== undefined) query.isActive = filters.isActive;
-
-  return this.find(query)
-    .sort({ createdAt: -1 })
-    .select('-password -otpSecret -__v');
-};
-
-// Compter les utilisateurs par rôle
-userSchema.statics.countByRole = function () {
-  return this.aggregate([
-    { $group: { _id: '$role', count: { $sum: 1 } } },
-    { $sort: { count: -1 } }
-  ]);
-};
-
-// ============================================
-// MÉTHODE TOJSON (masquer données sensibles)
-// ============================================
-userSchema.methods.toJSON = function () {
-  const user = this.toObject();
-
-  // Supprimer les données sensibles
-  delete user.password;
-  delete user.otpSecret;
-  delete user.__v;
-
-  return user;
-};
-
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
-function nextIfExists(next, error = null) {
-  if (next && typeof next === 'function') {
-    if (error) {
-      next(error);
-    } else {
-      next();
+  kycFields.forEach(field => {
+    if (kycData[field] !== undefined) {
+      this[field] = kycData[field];
     }
-  } else if (error) {
-    throw error;
-  }
-}
+  });
 
-// ============================================
-// EXPORT
-// ============================================
+  this.kycValide = true;
+  this.dateKyc = new Date();
+  this.updatedAt = new Date();
+
+  return await this.save();
+};
+
+// Vérifier si le KYC est complet
+userSchema.methods.isKYCComplete = function () {
+  const requiredFields = [
+    'numeroCNI', 'dateNaissance', 'lieuNaissance', 'genre',
+    'situationMatrimoniale', 'adresse.rue', 'adresse.ville',
+    'profession', 'employeur', 'revenuMensuel', 'numeroCompte'
+  ];
+
+  for (const field of requiredFields) {
+    const value = this.get(field);
+    if (!value || (typeof value === 'string' && value.trim() === '')) {
+      return false;
+    }
+  }
+
+  return this.documentsFournis.cni && 
+         this.documentsFournis.justificatifDomicile && 
+         this.documentsFournis.photo;
+};
+
+// Calculer le score de crédit
+userSchema.methods.calculateCreditScore = function () {
+  let score = 500; // Score de base
+
+  // Âge (18-65)
+  if (this.dateNaissance) {
+    const age = new Date().getFullYear() - new Date(this.dateNaissance).getFullYear();
+    if (age >= 25 && age <= 50) score += 50;
+    if (age < 25 || age > 60) score -= 30;
+  }
+
+  // Revenu mensuel
+  if (this.revenuMensuel) {
+    if (this.revenuMensuel > 500000) score += 100;
+    else if (this.revenuMensuel > 200000) score += 50;
+    else if (this.revenuMensuel < 50000) score -= 50;
+  }
+
+  // Notation client
+  const notationScores = { 'A': 100, 'B': 50, 'C': 0, 'D': -50, 'E': -100 };
+  if (this.notationClient) score += notationScores[this.notationClient] || 0;
+
+  // KYC validé
+  if (this.kycValide) score += 50;
+
+  // Pas dans la liste SMP
+  if (!this.listeSMP) score += 100;
+
+  // Limiter le score entre 300 et 850
+  return Math.min(Math.max(score, 300), 850);
+};
+
+// === MÉTHODES STATIQUES ===
+
+// Trouver par email avec sélection du mot de passe
+userSchema.statics.findByEmailWithPassword = function (email) {
+  return this.findOne({ email });
+};
+
+// Générer un numéro de compte unique
+userSchema.statics.generateAccountNumber = async function () {
+  const prefix = 'CM';
+  let uniqueFound = false;
+  let accountNumber;
+
+  while (!uniqueFound) {
+    const randomNum = Math.floor(10000000 + Math.random() * 90000000);
+    accountNumber = `${prefix}${randomNum}`;
+
+    const existing = await this.findOne({ numeroCompte: accountNumber });
+    if (!existing) {
+      uniqueFound = true;
+    }
+  }
+
+  return accountNumber;
+};
+
+// Vérifier la disponibilité du CNI
+userSchema.statics.checkCNIAvailability = async function (cniNumber) {
+  const existing = await this.findOne({ numeroCNI: cniNumber });
+  return !existing;
+};
+
+// Trouver les clients par agence
+userSchema.statics.findClientsByAgency = function (agencyId, page = 1, limit = 20) {
+  const skip = (page - 1) * limit;
+  
+  return this.find({
+    role: 'client',
+    agencyId: agencyId,
+    isActive: true
+  })
+  .skip(skip)
+  .limit(limit)
+  .select('-password -passwordHistory')
+  .populate('conseillerAssigné', 'nom prenom email telephone')
+  .sort({ createdAt: -1 });
+};
+
+// Statistiques d'agence
+userSchema.statics.getAgencyStats = async function (agencyId) {
+  const stats = await this.aggregate([
+    {
+      $match: {
+        agencyId: mongoose.Types.ObjectId(agencyId),
+        isActive: true
+      }
+    },
+    {
+      $group: {
+        _id: '$role',
+        count: { $sum: 1 },
+        totalSolde: { $sum: '$soldeActuel' },
+        averageCreditScore: { $avg: '$scoreCredit' }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalClients: {
+          $sum: {
+            $cond: [{ $eq: ['$_id', 'client'] }, '$count', 0]
+          }
+        },
+        totalStaff: {
+          $sum: {
+            $cond: [{ $ne: ['$_id', 'client'] }, '$count', 0]
+          }
+        },
+        totalSolde: { $sum: '$totalSolde' },
+        roles: {
+          $push: {
+            role: '$_id',
+            count: '$count',
+            totalSolde: '$totalSolde',
+            averageCreditScore: '$averageCreditScore'
+          }
+        }
+      }
+    },
+    {
+      $project: {
+        _id: 0,
+        totalClients: 1,
+        totalStaff: 1,
+        totalSolde: 1,
+        roles: {
+          $filter: {
+            input: '$roles',
+            as: 'role',
+            cond: { $ne: ['$$role.role', null] }
+          }
+        }
+      }
+    }
+  ]);
+
+  return stats[0] || {
+    totalClients: 0,
+    totalStaff: 0,
+    totalSolde: 0,
+    roles: []
+  };
+};
+
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;

@@ -2,7 +2,6 @@
 const express = require('express');
 const router = express.Router();
 
-// Import des contrôleurs
 const {
   createUser,
   updateUserRole,
@@ -18,10 +17,12 @@ const {
   assignUserToAgency,
   deactivateAgency,
   getAgencyStats,
-  getAgencyUsers
+  getAgencyUsers,
+  assignConseillerToClient // ⬅️ AJOUTEZ CETTE LIGNE
 } = require('../../controllers/admin.controller');
 
-const { authenticate, authorize } = require('../../middlewares/auth.middleware');
+
+const { authenticate, authorize, requireAdmin } = require('../../middlewares/auth.middleware');
 const { ROLES } = require('../../constants/roles');
 const logger = require('../../utils/logger');
 const adminService = require('../../services/admin.service');
@@ -31,16 +32,9 @@ const adminService = require('../../services/admin.service');
 // ===============================
 
 /**
- * Middleware pour vérifier les rôles admin
- */
-const requireAdmin = (req, res, next) => {
-  authorize(ROLES.ADMIN)(req, res, next);
-};
-
-/**
  * Middleware pour vérifier les rôles autorisés pour la gestion des agences
  */
-const requireAgencyManagement = (allowedRoles = [ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM, ROLES.DCE]) => {
+const requireAgencyManagement = (allowedRoles = [ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM, ROLES.DCE, ROLES.CONSEILLER]) => {
   return (req, res, next) => {
     if (!req.user || !req.user.role) {
       return res.status(401).json({
@@ -148,11 +142,11 @@ router.post('/users',
 /**
  * @route   GET /api/v1/admin/users
  * @desc    Récupérer tous les utilisateurs avec pagination et filtres
- * @access  Admin, DGA, ADG
+ * @access  Admin, DGA, ADG, RM, DCE, Conseiller
  */
 router.get('/users',
   authenticate,
-  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG]),
+  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM, ROLES.DCE, ROLES.CONSEILLER]),
   async (req, res) => {
     try {
       const {
@@ -202,16 +196,16 @@ router.get('/users/agency/:agencyName',
   async (req, res) => {
     try {
       const { agencyName } = req.params;
-      const { 
-        role, 
+      const {
+        role,
         isActive = 'true',
-        page = 1, 
-        limit = 100 
+        page = 1,
+        limit = 100
       } = req.query;
 
       // Décoder le nom de l'agence (en cas d'espaces)
       const decodedAgencyName = decodeURIComponent(agencyName);
-      
+
       logger.info('Récupération utilisateurs par agence', {
         agencyName: decodedAgencyName,
         filters: { role, isActive, page, limit },
@@ -227,10 +221,10 @@ router.get('/users/agency/:agencyName',
       }
 
       const User = require('../../models/User');
-      
+
       // Construire la requête
-      const query = { 
-        agence: decodedAgencyName 
+      const query = {
+        agence: decodedAgencyName
       };
 
       // Filtres optionnels
@@ -310,11 +304,11 @@ router.get('/users/agency/:agencyName',
 /**
  * @route   GET /api/v1/admin/clients
  * @desc    Récupérer tous les clients avec filtres
- * @access  Admin, DGA, ADG, RM, DCE
+ * @access  Admin, DGA, ADG, RM, DCE, Conseiller
  */
 router.get('/clients',
   authenticate,
-  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM, ROLES.DCE]),
+  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM, ROLES.DCE, ROLES.CONSEILLER]),
   async (req, res) => {
     try {
       const {
@@ -346,6 +340,72 @@ router.get('/clients',
       return res.status(500).json({
         success: false,
         message: 'Erreur lors de la récupération des clients',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/clients/unassigned
+ * @desc    Récupérer tous les clients non assignés
+ * @access  Admin, DGA, ADG, RM
+ */
+router.get('/clients/unassigned',
+  authenticate,
+  authorize(ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM),
+  async (req, res) => {
+    try {
+      const { page = 1, limit = 20, agence } = req.query;
+
+      logger.info('Récupération clients non assignés', {
+        agence,
+        requestedBy: req.user.id
+      });
+
+      const User = require('../../models/User');
+
+      const query = {
+        role: 'client',
+        conseillerAssigné: null,
+        isActive: true
+      };
+
+      if (agence) {
+        query.agence = agence;
+      }
+
+      const [clients, total] = await Promise.all([
+        User.find(query)
+          .select('email nom prenom telephone agence notationClient numeroCompte createdAt')
+          .skip((page - 1) * limit)
+          .limit(parseInt(limit))
+          .sort({ createdAt: -1 })
+          .lean(),
+        User.countDocuments(query)
+      ]);
+
+      return res.json({
+        success: true,
+        data: {
+          clients: clients.map(client => ({
+            ...client,
+            id: client._id
+          })),
+          pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit)
+          }
+        }
+      });
+
+    } catch (error) {
+      logger.error('Erreur récupération clients non assignés:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des clients non assignés',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
@@ -421,6 +481,102 @@ router.get('/users/:userId',
 );
 
 /**
+ * @route   PUT /api/v1/admin/users/:userId
+ * @desc    Mettre à jour un utilisateur (profil, KYC, etc.)
+ * @access  Admin, DGA, ADG, ou l'utilisateur lui-même
+ */
+router.put('/users/:userId',
+  authenticate,
+  validateUserId,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { nom, prenom, telephone, cni, numeroCompte, classification, notationClient, kycValide, dateKyc } = req.body;
+
+      logger.info('Mise à jour utilisateur', {
+        userId,
+        updatedBy: req.user.id,
+        updates: Object.keys(req.body)
+      });
+
+      // Vérifier les permissions
+      const isAdmin = [ROLES.ADMIN, ROLES.DGA, ROLES.ADG].includes(req.user.role);
+      const isOwner = userId === req.user.id;
+
+      if (!isAdmin && !isOwner) {
+        return res.status(403).json({
+          success: false,
+          message: 'Vous n\'êtes pas autorisé à modifier cet utilisateur'
+        });
+      }
+
+      // Récupérer l'utilisateur
+      const User = require('../../models/User');
+      const user = await User.findById(userId);
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'Utilisateur non trouvé'
+        });
+      }
+
+      // Mettre à jour les champs autorisés
+      if (nom) user.nom = nom;
+      if (prenom) user.prenom = prenom;
+      if (telephone) user.telephone = telephone;
+      
+      // Champs KYC (admin seulement)
+      if (isAdmin) {
+        if (cni) user.numeroCNI = cni;
+        if (numeroCompte) user.numeroCompte = numeroCompte;
+        if (classification) user.classification = classification;
+        if (notationClient) user.notationClient = notationClient;
+        if (kycValide !== undefined) {
+          user.kycValide = kycValide;
+          if (kycValide) {
+            user.dateKyc = dateKyc || new Date();
+          }
+        }
+      }
+
+      await user.save();
+
+      logger.info(`Utilisateur ${userId} mis à jour`);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Utilisateur mis à jour avec succès',
+        data: {
+          user: {
+            id: user._id,
+            email: user.email,
+            nom: user.nom,
+            prenom: user.prenom,
+            telephone: user.telephone,
+            cni: user.numeroCNI,
+            numeroCompte: user.numeroCompte,
+            classification: user.classification,
+            notationClient: user.notationClient,
+            kycValide: user.kycValide,
+            dateKyc: user.dateKyc,
+            updatedAt: user.updatedAt
+          }
+        }
+      });
+
+    } catch (error) {
+      logger.error('Erreur mise à jour utilisateur:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la mise à jour de l\'utilisateur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
  * @route   PUT /api/v1/admin/users/:userId/role
  * @desc    Mettre à jour le rôle d'un utilisateur
  * @access  Admin uniquement
@@ -471,9 +627,9 @@ router.put('/users/:userId/role',
  * @desc    Activer/désactiver un utilisateur
  * @access  Admin, DGA
  */
-router.put('/users/:userId/status',
+router.put('/users/:userId/toggle-status',
   authenticate,
-  authorize([ROLES.ADMIN, ROLES.DGA]),
+  authorize(ROLES.ADMIN, ROLES.DGA, ROLES.ADG),
   validateUserId,
   async (req, res) => {
     try {
@@ -552,7 +708,7 @@ router.delete('/users/:userId',
  */
 router.put('/users/:userId/assign-agency',
   authenticate,
-  authorize([ROLES.ADMIN, ROLES.DGA, ROLES.ADG]),
+  authorize(ROLES.ADMIN, ROLES.DGA, ROLES.ADG),
   validateUserId,
   async (req, res) => {
     try {
@@ -608,7 +764,7 @@ router.put('/users/:userId/assign-agency',
  */
 router.post('/agences',
   authenticate,
-  authorize([ROLES.ADMIN, ROLES.DGA]),
+  authorize(ROLES.ADMIN, ROLES.DGA, ROLES.ADG),
   async (req, res) => {
     try {
       const { name, code, region, city, address } = req.body;
@@ -679,6 +835,38 @@ router.get('/agences',
 );
 
 /**
+ * @route   GET /api/v1/admin/agences/stats
+ * @desc    Récupérer les statistiques des agences
+ * @access  Admin, DGA, ADG
+ */
+router.get('/agences/stats',
+  authenticate,
+  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG]),
+  async (req, res) => {
+    try {
+      const { region, period } = req.query;
+
+      logger.info('Récupération statistiques agences', {
+        filters: { region, period },
+        requestedBy: req.user.id
+      });
+
+      const result = await getAgencyStats(region, period);
+
+      return res.status(result.success ? 200 : 400).json(result);
+
+    } catch (error) {
+      logger.error('Erreur récupération stats agences:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des statistiques',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
  * @route   GET /api/v1/admin/agences/:agencyId
  * @desc    Récupérer une agence spécifique
  * @access  Admin, DGA, ADG, RM, DCE
@@ -721,7 +909,7 @@ router.get('/agences/:agencyId',
  */
 router.put('/agences/:agencyId',
   authenticate,
-  authorize([ROLES.ADMIN, ROLES.DGA]),
+  authorize(ROLES.ADMIN, ROLES.DGA, ROLES.ADG),
   validateAgencyId,
   async (req, res) => {
     try {
@@ -757,7 +945,7 @@ router.put('/agences/:agencyId',
  */
 router.delete('/agences/:agencyId',
   authenticate,
-  authorize([ROLES.ADMIN, ROLES.DGA]),
+  authorize(ROLES.ADMIN, ROLES.DGA, ROLES.ADG),
   validateAgencyId,
   async (req, res) => {
     try {
@@ -792,38 +980,6 @@ router.delete('/agences/:agencyId',
       return res.status(500).json({
         success: false,
         message: 'Erreur lors de la désactivation de l\'agence',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    }
-  }
-);
-
-/**
- * @route   GET /api/v1/admin/agences/stats
- * @desc    Récupérer les statistiques des agences
- * @access  Admin, DGA, ADG
- */
-router.get('/agences/stats',
-  authenticate,
-  requireAgencyManagement([ROLES.ADMIN, ROLES.DGA, ROLES.ADG]),
-  async (req, res) => {
-    try {
-      const { region, period } = req.query;
-
-      logger.info('Récupération statistiques agences', {
-        filters: { region, period },
-        requestedBy: req.user.id
-      });
-
-      const result = await getAgencyStats(region, period);
-
-      return res.status(result.success ? 200 : 400).json(result);
-
-    } catch (error) {
-      logger.error('Erreur récupération stats agences:', error);
-      return res.status(500).json({
-        success: false,
-        message: 'Erreur lors de la récupération des statistiques',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
@@ -913,7 +1069,7 @@ router.get('/agences/:agencyId/users',
  */
 router.get('/export/users',
   authenticate,
-  authorize([ROLES.ADMIN, ROLES.DGA]),
+  authorize(ROLES.ADMIN, ROLES.DGA),
   async (req, res) => {
     try {
       const { format = 'csv', includeInactive = false } = req.query;
@@ -951,6 +1107,182 @@ router.get('/export/users',
     }
   }
 );
+
+/**
+ * @route   PUT /api/v1/admin/clients/:clientId/assign-conseiller/:conseillerId
+ * @desc    Assigner ou désassigner un conseiller à un client
+ * @access  Admin, DGA, ADG, RM
+ */
+router.put('/clients/:clientId/assign-conseiller/:conseillerId',
+  authenticate,
+  authorize(ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM),
+  async (req, res) => {
+    try {
+      const { clientId, conseillerId } = req.params;
+      const { assign = true } = req.body;
+
+      logger.info('Assignation conseiller-client', {
+        clientId,
+        conseillerId,
+        assign,
+        assignedBy: req.user.id
+      });
+
+      // Validation des IDs
+      if (!clientId || !/^[0-9a-fA-F]{24}$/.test(clientId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'ID client invalide'
+        });
+      }
+
+      if (!conseillerId || !/^[0-9a-fA-F]{24}$/.test(conseillerId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'ID conseiller invalide'
+        });
+      }
+
+      // Empêcher l'auto-assignation
+      if (clientId === conseillerId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Un client ne peut pas être son propre conseiller'
+        });
+      }
+
+      const result = await assignConseillerToClient(req, res);
+      return result;
+
+    } catch (error) {
+      logger.error('Erreur assignation conseiller-client:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de l\'assignation',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/v1/admin/conseillers/:conseillerId/clients
+ * @desc    Récupérer tous les clients d'un conseiller
+ * @access  Admin, DGA, ADG, RM, DCE, Conseiller (seulement ses propres clients)
+ */
+router.get('/conseillers/:conseillerId/clients',
+  authenticate,
+  async (req, res) => {
+    try {
+      const { conseillerId } = req.params;
+      const { page = 1, limit = 20, isActive = true } = req.query;
+
+      logger.info('Récupération clients du conseiller', {
+        conseillerId,
+        requestedBy: req.user.id
+      });
+
+      // Vérifier les permissions
+      const userRole = req.user.role;
+      const userId = req.user.id;
+
+      // Si l'utilisateur n'est pas admin/DGA/ADG/RM et demande un autre conseiller que lui-même
+      if (![ROLES.ADMIN, ROLES.DGA, ROLES.ADG, ROLES.RM].includes(userRole)) {
+        if (conseillerId !== userId) {
+          return res.status(403).json({
+            success: false,
+            message: 'Vous ne pouvez voir que vos propres clients'
+          });
+        }
+      }
+
+      const User = require('../../models/User');
+
+      // Vérifier que le conseiller existe
+      const conseiller = await User.findById(conseillerId);
+      if (!conseiller) {
+        return res.status(404).json({
+          success: false,
+          message: 'Conseiller non trouvé'
+        });
+      }
+
+      // Vérifier que c'est bien un conseiller
+      if (!['conseiller', 'rm'].includes(conseiller.role)) {
+        return res.status(400).json({
+          success: false,
+          message: 'L\'utilisateur n\'est pas un conseiller'
+        });
+      }
+
+      // Récupérer les clients assignés
+      const query = {
+        role: 'client',
+        conseillerAssigné: conseillerId,
+        isActive: isActive === 'true'
+      };
+
+      const [clients, total] = await Promise.all([
+        User.find(query)
+          .select('email nom prenom telephone agence notationClient numeroCompte isActive createdAt')
+          .skip((page - 1) * limit)
+          .limit(parseInt(limit))
+          .sort({ nom: 1 })
+          .lean(),
+        User.countDocuments(query)
+      ]);
+
+      // Statistiques
+      const stats = await User.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            totalActifs: {
+              $sum: { $cond: [{ $eq: ['$isActive', true] }, 1, 0] }
+            },
+            moyenneNotation: { $avg: '$notationClient' }
+          }
+        }
+      ]);
+
+      return res.json({
+        success: true,
+        data: {
+          conseiller: {
+            id: conseiller._id,
+            email: conseiller.email,
+            nom: conseiller.nom,
+            prenom: conseiller.prenom,
+            role: conseiller.role,
+            agence: conseiller.agence
+          },
+          clients: clients.map(client => ({
+            ...client,
+            id: client._id
+          })),
+          pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit)
+          },
+          stats: stats[0] || { total: 0, totalActifs: 0, moyenneNotation: 0 }
+        }
+      });
+
+    } catch (error) {
+      logger.error('Erreur récupération clients conseiller:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur lors de la récupération des clients',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+);
+
 
 /**
  * @route   POST /api/v1/admin/users/bulk

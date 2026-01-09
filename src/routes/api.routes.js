@@ -1,10 +1,30 @@
-// routes/api.routes.js
+// routes/api.routes.js - VERSION RÉORGANISÉE
 const express = require('express');
 const router = express.Router();
 
-// Importer les routes
+// ==========================================
+// ROUTES D'AUTHENTIFICATION (Publiques)
+// ==========================================
 const authRoutes = require('./auth.routes');
+router.use('/auth', authRoutes);
+
+// ==========================================
+// ROUTES UTILISATEUR (Authentifiées)
+// ==========================================
+const userRoutes = require('./user.routes');
+router.use('/user', userRoutes);
+
+// ==========================================
+// ROUTES ADMIN (Admin seulement)
+// ==========================================
 const adminRoutes = require('./admin');
+router.use('/admin', adminRoutes);
+
+// ==========================================
+// AUTRES ROUTES EXISTANTES (Authentifiées)
+// ==========================================
+const { authenticate } = require('../middlewares/auth.middleware');
+
 const schedulerRoutes = require('./scheduler.routes');
 const demandeForçageRoutes = require('./demandeForçage.routes');
 const dashboardRoutes = require('./dashboard.routes');
@@ -16,21 +36,21 @@ const signatureRoutes = require('./signature.routes');
 const workflowRoutes = require('./workflow.routes');
 const reportRoutes = require('./report.routes');
 
-// Routes publiques
-router.use('/auth', authRoutes);
+// Routes protégées existantes
+router.use('/scheduler', authenticate, schedulerRoutes);
+router.use('/demandes', authenticate, demandeForçageRoutes);
+router.use('/dashboard', authenticate, dashboardRoutes);
+router.use('/roles', authenticate, roleRoutes);
+router.use('/notifications', authenticate, notificationRoutes);
+router.use('/chat', authenticate, chatRoutes);
+router.use('/documents', authenticate, documentRoutes);
+router.use('/signatures', authenticate, signatureRoutes);
+router.use('/workflow', authenticate, workflowRoutes);
+router.use('/reports', authenticate, reportRoutes);
 
-// Routes protégées (Middleware d'authentification pourrait être ajouté ici si besoin globalement)
-router.use('/admin', adminRoutes);
-router.use('/scheduler', schedulerRoutes);
-router.use('/demandes', demandeForçageRoutes);
-router.use('/dashboard', dashboardRoutes);
-router.use('/roles', roleRoutes);
-router.use('/notifications', notificationRoutes);
-router.use('/chat', chatRoutes);
-router.use('/documents', documentRoutes);
-router.use('/signatures', signatureRoutes);
-router.use('/workflow', workflowRoutes);
-router.use('/reports', reportRoutes);
+// Alias pour risques (frontend appelle /risques/statistics)
+const risksRoutes = require('./admin/risks.routes');
+router.use('/risques', authenticate, risksRoutes);
 
 // Route de santé
 router.get('/health', (req, res) => {

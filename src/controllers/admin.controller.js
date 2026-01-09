@@ -317,68 +317,101 @@ const updateUserRole = async (req, res) => {
 // Liste des utilisateurs avec pagination optimisée
 const getAllUsers = async (req, res) => {
   try {
-    logger.header('GET ALL USERS', '👥');
-    logger.request('GET', '/admin/users', req.user);
+    console.log('🔍 [DEBUG getAllUsers] Début ============');
+    console.log('User making request:', req.user?.id, req.user?.email, req.user?.role);
+    console.log('Query params:', req.query);
 
     const { role, agence, isActive, page = 1, limit = 20 } = req.query;
-    logger.debug('Query params:', { role, agence, isActive, page, limit });
 
+    // DEBUG: Vérifiez que User est bien importé
+    console.log('🔄 Étape 1: Vérification modèle User...');
+    const User = require('../models/User');
+    console.log('✅ Modèle User chargé');
+
+    // DEBUG: Simple count pour tester
+    console.log('🔄 Étape 2: Count documents...');
+    const totalCount = await User.countDocuments({});
+    console.log(`✅ Total documents: ${totalCount}`);
+
+    // Construire le filtre
     const filter = {};
-    if (role) filter.role = role;
-    if (agence) filter.agence = agence;
-    if (isActive !== undefined) filter.isActive = isActive === 'true';
+    if (role) {
+      console.log(`Filtre role: ${role}`);
+      filter.role = role;
+    }
+    if (agence) {
+      console.log(`Filtre agence: ${agence}`);
+      filter.agence = agence;
+    }
+    if (isActive !== undefined) {
+      console.log(`Filtre isActive: ${isActive}`);
+      filter.isActive = isActive === 'true';
+    }
 
-    logger.database('FIND', 'User', filter);
+    console.log('Filtre final:', filter);
 
-    // OPTIMISATION: Sélectionner seulement les champs nécessaires
+    // DEBUG: Trouver des utilisateurs simples
+    console.log('🔄 Étape 3: Find avec filtre...');
     const users = await User.find(filter)
-      .select('email nom prenom role agence agencyId isActive limiteAutorisation createdAt lastLogin')
-      .limit(parseInt(limit))
-      .skip((page - 1) * limit)
-      .sort({ createdAt: -1 });
+      .select('email nom prenom role agence isActive createdAt')
+      .limit(parseInt(limit) || 5)
+      .skip(((parseInt(page) || 1) - 1) * (parseInt(limit) || 5))
+      .sort({ createdAt: -1 })
+      .lean();
+
+    console.log(`✅ Users trouvés: ${users.length}`);
 
     const total = await User.countDocuments(filter);
 
-    logger.success(`Found ${users.length} users`, { total, page, limit });
-
-    // OPTIMISATION: Structure de réponse légère
+    // DEBUG: Vérifier le format des données
+    console.log('🔄 Étape 4: Formatage réponse...');
     const response = {
       users: users.map(user => ({
-        id: user._id,
+        id: user._id.toString(),
         email: user.email,
         nom: user.nom,
         prenom: user.prenom,
         role: user.role,
         agence: user.agence,
-        agencyId: user.agencyId,
         isActive: user.isActive,
-        limiteAutorisation: user.limiteAutorisation,
-        lastLogin: user.lastLogin,
         createdAt: user.createdAt
       })),
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / limit)
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 20,
+        pages: Math.ceil(total / (parseInt(limit) || 20))
       }
     };
 
-    logger.response(200, 'Utilisateurs récupérés');
-    logger.footer();
+    console.log('✅ Réponse prête');
+    console.log('🔍 [DEBUG getAllUsers] Fin ============');
 
     return successResponse(res, 200, 'Utilisateurs récupérés', response);
 
   } catch (error) {
-    logger.error('Error fetching users', error);
-    logger.footer();
-    return errorResponse(res, 500, 'Erreur serveur');
+    console.error('🔥 ERREUR CRITIQUE dans getAllUsers:');
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+
+    if (error.name === 'MongoError') {
+      console.error('Mongo error code:', error.code);
+    }
+
+    return errorResponse(res, 500, 'Erreur serveur détaillée', {
+      error: error.message,
+      name: error.name,
+      code: error.code,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
 // Activation/désactivation avec réponse optimisée
 const toggleUserStatus = async (req, res) => {
   try {
+    const notificationService = require('../services/notification.service');
     logger.header('TOGGLE USER STATUS', '⚡');
     logger.request('PUT', `/admin/users/${req.params.userId}/status`, req.user);
 
@@ -406,6 +439,30 @@ const toggleUserStatus = async (req, res) => {
 
     logger.database('UPDATE', 'User', { id: user._id, isActive: newStatus });
     logger.success('User status updated', { id: user._id, isActive: newStatus });
+
+    // Envoyer une notification
+    try {
+      await notificationService.createNotification({
+        utilisateur: user._id,
+        titre: newStatus ? 'Compte activé' : 'Compte désactivé',
+        message: newStatus
+          ? 'Votre compte a été activé. Vous pouvez maintenant vous connecter.'
+          : 'Votre compte a été désactivé par un administrateur.',
+        entite: 'systeme',
+        type: newStatus ? 'success' : 'warning',
+        priorite: 'haute',
+        categorie: 'system',
+        source: 'system',
+        metadata: {
+          status: newStatus ? 'active' : 'inactive',
+          updatedBy: req.userId
+        },
+        declencheur: req.userId
+      });
+      logger.info('Notification sent to user', { userId: user._id });
+    } catch (notifError) {
+      logger.error('Error sending notification', notifError);
+    }
 
     // RÉPONSE OPTIMISÉE
     logger.response(200, `Utilisateur ${newStatus ? 'activé' : 'désactivé'}`);
@@ -519,9 +576,10 @@ const getAllClients = async (req, res) => {
 
     logger.database('FIND', 'User', filter);
 
-    // OPTIMISATION: Sélectionner seulement les champs nécessaires
+    // OPTIMISATION: Sélectionner seulement les champs nécessaires + conseillerAssigné
     const clients = await User.find(filter)
-      .select('email nom prenom role agence agencyId isActive limiteAutorisation notationClient numeroCompte createdAt lastLogin')
+      .select('email nom prenom role agence agencyId isActive limiteAutorisation notationClient numeroCompte conseillerAssigné createdAt lastLogin')
+      .populate('conseillerAssigné', 'nom prenom email telephone')
       .limit(parseInt(limit))
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
@@ -544,6 +602,13 @@ const getAllClients = async (req, res) => {
         limiteAutorisation: client.limiteAutorisation,
         notationClient: client.notationClient,
         numeroCompte: client.numeroCompte,
+        conseillerAssigné: client.conseillerAssigné ? {
+          id: client.conseillerAssigné._id,
+          nom: client.conseillerAssigné.nom,
+          prenom: client.conseillerAssigné.prenom,
+          email: client.conseillerAssigné.email,
+          telephone: client.conseillerAssigné.telephone
+        } : null,
         lastLogin: client.lastLogin,
         createdAt: client.createdAt
       })),
@@ -566,6 +631,389 @@ const getAllClients = async (req, res) => {
     return errorResponse(res, 500, 'Erreur serveur');
   }
 };
+
+
+/**
+ * Assigner un conseiller à un client - VERSION CORRIGÉE
+ */
+const assignConseillerToClient = async (req, res) => {
+  try {
+    console.log('🔗 [assignConseillerToClient] Début - Version corrigée');
+
+    const { clientId, conseillerId } = req.params;
+    const { assign = true } = req.body; // true pour assigner, false pour désassigner
+
+    console.log('📋 Données reçues:');
+    console.log('  - clientId:', clientId);
+    console.log('  - conseillerId:', conseillerId);
+    console.log('  - assign:', assign);
+    console.log('  - body complet:', req.body);
+    console.log('  - user qui fait la requête:', req.user);
+
+    // Vérification préliminaire des IDs
+    if (!clientId || typeof clientId !== 'string') {
+      console.error('❌ clientId invalide:', clientId);
+      return errorResponse(res, 400, 'ID client invalide');
+    }
+
+    if (!conseillerId || typeof conseillerId !== 'string') {
+      console.error('❌ conseillerId invalide:', conseillerId);
+      return errorResponse(res, 400, 'ID conseiller invalide');
+    }
+
+    // Empêcher l'auto-assignation
+    if (clientId === conseillerId) {
+      console.error('❌ Auto-assignation détectée');
+      return errorResponse(res, 400, 'Un client ne peut pas être son propre conseiller');
+    }
+
+    // Vérifier que le client existe
+    console.log('🔍 Recherche du client...');
+    const client = await User.findById(clientId);
+    if (!client) {
+      console.error('❌ Client non trouvé avec ID:', clientId);
+      console.error('❌ Est-ce un ObjectId valide?', /^[0-9a-fA-F]{24}$/.test(clientId));
+      return errorResponse(res, 404, 'Client non trouvé');
+    }
+
+    console.log('✅ Client trouvé:', {
+      id: client._id.toString(),
+      email: client.email,
+      nom: client.nom,
+      prenom: client.prenom,
+      role: client.role,
+      conseillerAssigné: client.conseillerAssigné
+    });
+
+    // Vérifier que le client a bien le rôle 'client'
+    if (!client.role) {
+      console.error('❌ Client sans rôle défini');
+      console.error('❌ Document client complet:', JSON.stringify(client.toObject ? client.toObject() : client, null, 2));
+      return errorResponse(res, 400, 'Le client n\'a pas de rôle défini');
+    }
+
+    const clientRole = String(client.role).toLowerCase().trim();
+    if (clientRole !== 'client') {
+      console.error('❌ Utilisateur n\'est pas un client:', clientRole);
+      return errorResponse(res, 400, `L'utilisateur doit être un client (rôle actuel: ${clientRole})`);
+    }
+
+    // Vérifier que le conseiller existe
+    console.log('🔍 Recherche du conseiller...');
+    const conseiller = await User.findById(conseillerId);
+    if (!conseiller) {
+      console.error('❌ Conseiller non trouvé avec ID:', conseillerId);
+      console.error('❌ Est-ce un ObjectId valide?', /^[0-9a-fA-F]{24}$/.test(conseillerId));
+      return errorResponse(res, 404, 'Conseiller non trouvé');
+    }
+
+    console.log('✅ Conseiller trouvé:', {
+      id: conseiller._id.toString(),
+      email: conseiller.email,
+      nom: conseiller.nom,
+      prenom: conseiller.prenom,
+      role: conseiller.role
+    });
+
+    // Vérifier que le conseiller a bien un rôle
+    if (!conseiller.role) {
+      console.error('❌ Conseiller sans rôle défini');
+      console.error('❌ Document conseiller complet:', JSON.stringify(conseiller.toObject ? conseiller.toObject() : conseiller, null, 2));
+      return errorResponse(res, 400, 'Le conseiller n\'a pas de rôle défini');
+    }
+
+    // Normaliser et vérifier le rôle du conseiller
+    const conseillerRole = String(conseiller.role).toLowerCase().trim();
+    console.log('🔍 Rôle conseiller normalisé:', conseillerRole);
+
+    const rolesConseillerValides = ['conseiller', 'rm'];
+    console.log('🔍 Rôles valides pour conseiller:', rolesConseillerValides);
+    console.log('🔍 Est conseiller/rm?', rolesConseillerValides.includes(conseillerRole));
+
+    if (!rolesConseillerValides.includes(conseillerRole)) {
+      console.error('❌ Utilisateur n\'est pas un conseiller ou RM:', conseillerRole);
+      return errorResponse(res, 400, `L'utilisateur doit être un conseiller ou RM (rôle actuel: ${conseillerRole})`);
+    }
+
+    console.log('✅ Toutes les validations passées');
+
+    if (assign) {
+      console.log('🔄 Début de l\'assignation...');
+
+      // Vérifier si déjà assigné
+      if (client.conseillerAssigné && client.conseillerAssigné.toString() === conseillerId) {
+        console.log('⚠️ Client déjà assigné à ce conseiller');
+        return successResponse(res, 200, 'Client déjà assigné à ce conseiller', {
+          client: {
+            id: client._id,
+            email: client.email,
+            nom: client.nom,
+            prenom: client.prenom
+          },
+          conseiller: {
+            id: conseiller._id,
+            email: conseiller.email,
+            nom: conseiller.nom,
+            prenom: conseiller.prenom
+          }
+        });
+      }
+
+      // Désassigner l'ancien conseiller si présent
+      if (client.conseillerAssigné) {
+        console.log('🔄 Désassignation de l\'ancien conseiller...');
+        const ancienConseiller = await User.findById(client.conseillerAssigné);
+        if (ancienConseiller) {
+          if (ancienConseiller.clients) {
+            ancienConseiller.clients = ancienConseiller.clients.filter(
+              id => id.toString() !== clientId
+            );
+            await ancienConseiller.save();
+          }
+          console.log('✅ Ancien conseiller désassigné:', ancienConseiller.email);
+        }
+      }
+
+      // Assigner le nouveau conseiller
+      console.log('🔄 Assignation du nouveau conseiller...');
+      client.conseillerAssigné = conseillerId;
+      await client.save();
+      console.log('✅ Client mis à jour avec nouveau conseiller');
+
+      // Initialiser le tableau clients s'il n'existe pas
+      if (!conseiller.clients) {
+        conseiller.clients = [];
+        console.log('✅ Tableau clients initialisé pour le conseiller');
+      }
+
+      // Ajouter le client à la liste des clients du conseiller
+      const clientIdStr = clientId.toString();
+      if (!conseiller.clients.some(id => id.toString() === clientIdStr)) {
+        conseiller.clients.push(clientId);
+        await conseiller.save();
+        console.log('✅ Client ajouté à la liste du conseiller');
+      } else {
+        console.log('⚠️ Client déjà dans la liste du conseiller');
+      }
+
+      console.log('✅ Assignation terminée avec succès');
+      console.log('📊 Résumé:');
+      console.log('  Client:', client.email);
+      console.log('  Conseiller:', conseiller.email);
+      console.log('  Nombre de clients du conseiller:', conseiller.clients.length);
+
+      // Notification (optionnel)
+      try {
+        await createAssignmentNotification(client, conseiller, req.userId);
+        console.log('✅ Notifications créées');
+      } catch (notifError) {
+        console.error('⚠️ Erreur création notifications:', notifError.message);
+        // Ne pas bloquer l'assignation pour une erreur de notification
+      }
+
+      return successResponse(res, 200, 'Conseiller assigné avec succès', {
+        client: {
+          id: client._id,
+          email: client.email,
+          nom: client.nom,
+          prenom: client.prenom,
+          conseillerAssigné: {
+            id: conseiller._id,
+            email: conseiller.email,
+            nom: conseiller.nom,
+            prenom: conseiller.prenom
+          }
+        },
+        conseiller: {
+          id: conseiller._id,
+          email: conseiller.email,
+          nom: conseiller.nom,
+          prenom: conseiller.prenom,
+          totalClients: conseiller.clients.length
+        }
+      });
+
+    } else {
+      console.log('🔄 Début de la désassignation...');
+
+      // Vérifier si le client est assigné à ce conseiller
+      if (!client.conseillerAssigné || client.conseillerAssigné.toString() !== conseillerId) {
+        console.log('⚠️ Client non assigné à ce conseiller');
+        return successResponse(res, 200, 'Client non assigné à ce conseiller');
+      }
+
+      // Désassigner
+      client.conseillerAssigné = null;
+      await client.save();
+      console.log('✅ Client désassigné');
+
+      // Retirer le client de la liste du conseiller
+      if (conseiller.clients) {
+        const initialLength = conseiller.clients.length;
+        conseiller.clients = conseiller.clients.filter(
+          id => id.toString() !== clientId
+        );
+
+        if (conseiller.clients.length < initialLength) {
+          await conseiller.save();
+          console.log('✅ Client retiré de la liste du conseiller');
+        }
+      }
+
+      // Envoyer une notification de désassignation
+      try {
+        await createUnassignmentNotification(client, conseiller, req.userId);
+        console.log('✅ Notifications de désassignation créées');
+      } catch (notifError) {
+        console.error('⚠️ Erreur création notifications désassignation:', notifError.message);
+      }
+
+      console.log('✅ Désassignation terminée avec succès');
+
+      return successResponse(res, 200, 'Conseiller désassigné avec succès', {
+        client: {
+          id: client._id,
+          email: client.email,
+          nom: client.nom,
+          prenom: client.prenom,
+          conseillerAssigné: null
+        },
+        conseiller: {
+          id: conseiller._id,
+          email: conseiller.email,
+          nom: conseiller.nom,
+          prenom: conseiller.prenom,
+          totalClients: conseiller.clients ? conseiller.clients.length : 0
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('🔥 ERREUR assignConseillerToClient:');
+    console.error('  Message:', error.message);
+    console.error('  Stack:', error.stack);
+    console.error('  Name:', error.name);
+    console.error('  Code:', error.code);
+
+    // Log supplémentaire pour les erreurs Mongoose
+    if (error.name === 'CastError') {
+      console.error('  CastError path:', error.path);
+      console.error('  CastError value:', error.value);
+      console.error('  CastError kind:', error.kind);
+    }
+
+    return errorResponse(res, 500, 'Erreur lors de l\'assignation', {
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Fonction helper pour créer une notification d'assignation
+ */
+const createAssignmentNotification = async (client, conseiller, adminId) => {
+  try {
+    const notificationService = require('../services/notification.service');
+
+    // Notification pour le client
+    await notificationService.createNotification({
+      utilisateur: client._id,
+      titre: 'Nouveau conseiller assigné',
+      message: `M. ${conseiller.nom} ${conseiller.prenom} est maintenant votre conseiller`,
+      entite: 'user',
+      entiteId: conseiller._id,
+      type: 'info',
+      priorite: 'normale',
+      categorie: 'client',
+      metadata: {
+        conseillerId: conseiller._id,
+        conseillerNom: `${conseiller.nom} ${conseiller.prenom}`,
+        assignedBy: adminId,
+        type: 'ASSIGNATION_CONSEILLER'
+      },
+      source: 'system',
+      declencheur: adminId
+    });
+
+    // Notification pour le conseiller
+    await notificationService.createNotification({
+      utilisateur: conseiller._id,
+      titre: 'Nouveau client assigné',
+      message: `M. ${client.nom} ${client.prenom} vous a été assigné comme client`,
+      entite: 'user',
+      entiteId: client._id,
+      type: 'info',
+      priorite: 'normale',
+      categorie: 'client',
+      metadata: {
+        clientId: client._id,
+        clientNom: `${client.nom} ${client.prenom}`,
+        assignedBy: adminId,
+        type: 'NOUVEAU_CLIENT'
+      },
+      source: 'system',
+      declencheur: adminId
+    });
+
+    console.log('✅ Notifications créées via NotificationService');
+  } catch (error) {
+    console.error('❌ Erreur création notifications:', error);
+  }
+};
+
+/**
+ * Fonction helper pour créer une notification de désassignation
+ */
+const createUnassignmentNotification = async (client, conseiller, adminId) => {
+  try {
+    const notificationService = require('../services/notification.service');
+
+    // Notification pour le client
+    await notificationService.createNotification({
+      utilisateur: client._id,
+      titre: 'Mise à jour de votre dossier',
+      message: `M. ${conseiller.nom} ${conseiller.prenom} n'est plus votre conseiller`,
+      entite: 'user',
+      entiteId: conseiller._id,
+      type: 'info',
+      priorite: 'normale',
+      categorie: 'client',
+      metadata: {
+        conseillerId: conseiller._id,
+        conseillerNom: `${conseiller.nom} ${conseiller.prenom}`,
+        unassignedBy: adminId,
+        type: 'DESASSIGNATION_CONSEILLER'
+      },
+      source: 'system',
+      declencheur: adminId
+    });
+
+    // Notification pour le conseiller
+    await notificationService.createNotification({
+      utilisateur: conseiller._id,
+      titre: 'Mise à jour portefeuille client',
+      message: `Le client M. ${client.nom} ${client.prenom} a été retiré de votre portefeuille`,
+      entite: 'user',
+      entiteId: client._id,
+      type: 'info',
+      priorite: 'normale',
+      categorie: 'client',
+      metadata: {
+        clientId: client._id,
+        clientNom: `${client.nom} ${client.prenom}`,
+        unassignedBy: adminId,
+        type: 'RETRAIT_CLIENT'
+      },
+      source: 'system',
+      declencheur: adminId
+    });
+
+    console.log('✅ Notifications de désassignation créées via NotificationService');
+  } catch (error) {
+    console.error('❌ Erreur création notifications désassignation:', error);
+  }
+};
+
 
 /**
  * Créer une nouvelle agence
@@ -885,11 +1333,11 @@ const getAgencyById = async (req, res) => {
 const getUsersByAgency = async (req, res) => {
   try {
     const { agencyName } = req.params;
-    const { 
-      role, 
+    const {
+      role,
       isActive = 'true',
-      page = 1, 
-      limit = 100 
+      page = 1,
+      limit = 100
     } = req.query;
 
     console.log(`🔍 getUsersByAgency: ${agencyName}`);
@@ -903,7 +1351,7 @@ const getUsersByAgency = async (req, res) => {
 
     const decodedAgencyName = decodeURIComponent(agencyName);
     const User = require('../models/User');
-    
+
     // Construire la requête
     const query = { agence: decodedAgencyName };
 
@@ -968,7 +1416,6 @@ const getUsersByAgency = async (req, res) => {
   }
 };
 
-
 module.exports = {
   createUser,
   updateUserRole,
@@ -976,45 +1423,11 @@ module.exports = {
   getAllClients,
   getUsersByAgency,
   toggleUserStatus,
+  assignConseillerToClient,
   getUserById,
   deleteUser,
   createAgency,
   getAgences,
   updateAgency,
-  getAgencyById,
-  assignUserToAgency: async (req, res) => {
-    try {
-      res.json({ success: true, message: 'Utilisateur assigné à l\'agence' });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-  getUsersByAgency: async (req, res) => {
-    try {
-      res.json({ success: true, users: [] });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-  getAgencyStats: async (req, res) => {
-    try {
-      res.json({ success: true, stats: {} });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-  deactivateAgency: async (req, res) => {
-    try {
-      res.json({ success: true, message: 'Agence désactivée' });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-  getAgencyUsers: async (req, res) => {
-    try {
-      res.json({ success: true, users: [] });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  }
+  getAgencyById
 };

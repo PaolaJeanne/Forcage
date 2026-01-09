@@ -10,9 +10,14 @@ export const authService = {
             body: JSON.stringify({ email, password })
         });
 
-        if (data.success && data.token) {
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user || data.data?.user));
+        if (data.success && data.data) {
+            const { token, refreshToken, user } = data.data;
+            if (token) {
+                localStorage.setItem('token', token);
+                localStorage.setItem('refreshToken', refreshToken || '');
+                localStorage.setItem('user', JSON.stringify(user));
+                console.log('✅ Token stored in localStorage:', token.substring(0, 20) + '...');
+            }
         }
         return data;
     },

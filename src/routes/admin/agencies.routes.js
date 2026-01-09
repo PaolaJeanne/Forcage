@@ -8,7 +8,7 @@ const { validateAgencyId } = require('../../middlewares/validation.middleware');
 router.get('/', adminController.getAgences);
 
 // Récupérer les statistiques des agences
-router.get('/statistics', adminController.getAgencyStats);
+//router.get('/statistics', adminController.getAgencyStats);
 
 // Créer une nouvelle agence
 router.post('/', adminController.createAgency);
@@ -20,9 +20,9 @@ router.get('/:agencyId', validateAgencyId, adminController.getAgencyById);
 router.put('/:agencyId', validateAgencyId, adminController.updateAgency);
 
 // Désactiver une agence
-router.delete('/:agencyId', validateAgencyId, adminController.deactivateAgency);
+//router.delete('/:agencyId', validateAgencyId, adminController.deactivateAgency);
 
 // Récupérer les utilisateurs d'une agence
-router.get('/:agencyId/users', validateAgencyId, adminController.getAgencyUsers);
+router.get('/:agencyId/users', validateAgencyId, adminController.getAgencyById);
 
 module.exports = router;

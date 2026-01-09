@@ -1,18 +1,16 @@
 // routes/admin/index.js
 const express = require('express');
 const router = express.Router();
-const { authenticate, authorize } = require('../../middlewares/auth.middleware');
-const { ROLES } = require('../../constants/roles');
+const { authenticate } = require('../../middlewares/auth.middleware');
 
 // Importer les sous-routes
 const usersRoutes = require('./admin.users.routes');
-const agenciesRoutes = require('./agencies.routes');
 const auditRoutes = require('./audit.routes');
 const risksRoutes = require('./risks.routes');
 
-// Middleware pour toutes les routes admin
+// Middleware pour toutes les routes admin - authentification seulement
+// Les autorisations spécifiques sont gérées dans chaque sous-route
 router.use(authenticate);
-router.use(authorize(ROLES.ADMIN, ROLES.DGA, ROLES.ADG));
 
 // Routes
 router.use('/', usersRoutes);

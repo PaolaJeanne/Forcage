@@ -10,6 +10,83 @@ class ChatService {
   // ==================== CONVERSATIONS ====================
 
   /**
+   * Démarrer une conversation de groupe avec plusieurs membres
+   */
+  async startGroupConversation(userId, recipientIds, firstMessage, subject = null) {
+    try {
+      // Validation des IDs
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        throw new Error('ID utilisateur émetteur invalide');
+      }
+
+      recipientIds.forEach(id => {
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw new Error(`ID destinataire invalide: ${id}`);
+        }
+      });
+
+      // Vérifier qu'on n'essaie pas de s'ajouter soi-même
+      const filteredRecipients = recipientIds.filter(
+        id => id.toString() !== userId.toString()
+      );
+
+      if (filteredRecipients.length === 0) {
+        throw new Error('Vous devez sélectionner au moins un autre participant');
+      }
+
+      // Récupérer l'utilisateur émetteur
+      const user = await User.findById(userId).select('email nom prenom role isActive');
+      if (!user) {
+        throw new Error('Votre compte utilisateur est introuvable');
+      }
+
+      if (!user.isActive) {
+        throw new Error('Votre compte est inactif');
+      }
+
+      // Vérifier que tous les destinataires existent et sont actifs
+      const recipients = await User.find({
+        _id: { $in: filteredRecipients },
+        isActive: true
+      }).select('_id email nom prenom role');
+
+      if (recipients.length !== filteredRecipients.length) {
+        throw new Error('Un ou plusieurs destinataires sont introuvables ou inactifs');
+      }
+
+      // Créer la conversation de groupe
+      const participants = [userId, ...filteredRecipients];
+      const title = subject || `Groupe: ${user.prenom} ${user.nom} + ${recipients.length} autre(s)`;
+
+      const conversation = await Conversation.create({
+        participants,
+        type: 'group',
+        title,
+        createdBy: userId,
+        metadata: {
+          priority: 'medium',
+          createdAt: new Date()
+        },
+        lastActivityAt: new Date()
+      });
+
+      // Envoyer le premier message
+      if (firstMessage && firstMessage.trim()) {
+        await this.sendSimpleMessage(
+          conversation._id,
+          userId,
+          firstMessage
+        );
+      }
+
+      return conversation;
+
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
    * Démarrer une conversation avec un membre précis de l'équipe
    * Le client peut choisir avec qui il veut parler
    */
@@ -367,7 +444,7 @@ class ChatService {
 
   /**
    * Récupérer les messages d'une conversation
-   * Simple pagination
+   * Simple pagination comme WhatsApp
    */
   async getMessages(conversationId, userId, limit = 50, beforeDate = null) {
     try {
@@ -387,20 +464,20 @@ class ChatService {
         query.createdAt = { $lt: new Date(beforeDate) };
       }
 
+      // Récupérer les messages avec populate
       const messages = await Message.find(query)
         .sort({ createdAt: -1 })
         .limit(limit)
-        .populate('sender', 'nom prenom avatar role')
+        .populate('sender', 'nom prenom avatar role email')
         .lean();
 
       // Marquer comme lu
       await this.markAsRead(conversationId, userId);
 
-      // Retourner du plus ancien au plus récent
+      // Retourner du plus ancien au plus récent (comme WhatsApp)
       return messages.reverse();
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -517,6 +594,7 @@ class ChatService {
     try {
       const skip = (page - 1) * limit;
 
+      // Ne pas utiliser .lean() pour préserver les Maps
       const conversations = await Conversation.find({
         participants: userId,
         isArchived: archived
@@ -529,17 +607,33 @@ class ChatService {
           select: 'nom prenom avatar role',
           match: { _id: { $ne: userId } }
         })
-        .populate('demandeId', 'numeroReference montant statut')
-        .lean();
+        .populate('demandeId', 'numeroReference montant statut');
 
-      conversations.forEach(conv => {
-        conv.unreadCount = conv.unreadCount?.get(userId.toString()) || 0;
-        conv.participants = conv.participants.filter(p => p !== null);
-
-        if (!conv.title && conv.participants.length > 0) {
-          const other = conv.participants[0];
-          conv.title = `${other.prenom} ${other.nom}`;
+      // Formater les conversations
+      const formattedConversations = conversations.map(conv => {
+        const convObj = conv.toObject ? conv.toObject() : conv;
+        
+        // Gérer unreadCount - peut être une Map ou un objet
+        let unreadCount = 0;
+        if (conv.unreadCount) {
+          if (typeof conv.unreadCount.get === 'function') {
+            // C'est une Map
+            unreadCount = conv.unreadCount.get(userId.toString()) || 0;
+          } else if (typeof conv.unreadCount === 'object') {
+            // C'est un objet plain
+            unreadCount = conv.unreadCount[userId.toString()] || 0;
+          }
         }
+        
+        convObj.unreadCount = unreadCount;
+        convObj.participants = (convObj.participants || []).filter(p => p !== null);
+
+        if (!convObj.title && convObj.participants.length > 0) {
+          const other = convObj.participants[0];
+          convObj.title = `${other.prenom} ${other.nom}`;
+        }
+
+        return convObj;
       });
 
       const total = await Conversation.countDocuments({
@@ -548,14 +642,13 @@ class ChatService {
       });
 
       return {
-        conversations,
+        conversations: formattedConversations,
         total,
         page,
         pages: Math.ceil(total / limit)
       };
 
     } catch (error) {
-
       throw error;
     }
   }
@@ -572,13 +665,20 @@ class ChatService {
 
       let total = 0;
       conversations.forEach(conv => {
-        total += conv.unreadCount?.get(userId.toString()) || 0;
+        if (conv.unreadCount) {
+          if (typeof conv.unreadCount.get === 'function') {
+            // C'est une Map
+            total += conv.unreadCount.get(userId.toString()) || 0;
+          } else if (typeof conv.unreadCount === 'object') {
+            // C'est un objet plain
+            total += conv.unreadCount[userId.toString()] || 0;
+          }
+        }
       });
 
       return total;
 
     } catch (error) {
-
       return 0;
     }
   }

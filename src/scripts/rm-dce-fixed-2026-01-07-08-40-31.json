@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-01-07T08:40:31.279Z",
+  "note": "Correction ciblée des utilisateurs RM/DCE - Contournement des middlewares",
+  "users": [
+    {
+      "email": "admin@gmail.com",
+      "role": "admin",
+      "newPassword": "Temp49pP1YYE",
+      "status": "RESET"
+    },
+    {
+      "email": "moukodijeanne65@gmail.com",
+      "role": "client",
+      "newPassword": "TempMJnP56FQ",
+      "status": "RESET"
+    },
+    {
+      "email": "claudeandree@gmail.com",
+      "role": "conseiller",
+      "newPassword": "TempeLymfFMJ",
+      "status": "RESET"
+    },
+    {
+      "email": "legrand@gmail.com",
+      "role": "rm",
+      "newPassword": "Legrand@2024",
+      "status": "RESET"
+    },
+    {
+      "email": "brunel@gmail.com",
+      "role": "dce",
+      "newPassword": "Brunel@2024",
+      "status": "RESET"
+    }
+  ]
+}

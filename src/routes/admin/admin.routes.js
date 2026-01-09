@@ -1,30 +1,21 @@
-// routes/admin.routes.js
+// src/routes/admin.routes.js - Routes administration (Point d'entrée)
 const express = require('express');
 const router = express.Router();
-const adminController = require('../../controllers/admin.controller');
-const { authenticate, requireAdmin } = require('../../middlewares/auth.middleware');
-const schedulerRoutes = require('../scheduler.routes');
+const { authenticate } = require('../../middlewares/auth.middleware');
 
-// Toutes les routes admin nécessitent l'authentification admin
+// Middleware pour vérifier l'authentification
 router.use(authenticate);
-router.use(requireAdmin);
 
-// Gestion des utilisateurs
-router.post('/users', adminController.createUser);
-router.get('/users', adminController.getAllUsers);
-router.get('/users/:userId', adminController.getUserById);
-router.put('/users/:userId/role', adminController.updateUserRole);
-router.put('/users/:userId/toggle-status', adminController.toggleUserStatus);
-router.delete('/users/:userId', adminController.deleteUser);
+// ==========================================
+// ROUTES UTILISATEURS ET AGENCES
+// ==========================================
+const adminUsersRoutes = require('./admin.users.routes');
+router.use('/', adminUsersRoutes);
 
-// Gestion des clients (utilisateurs avec role='client')
-router.get('/clients', adminController.getAllClients);
-
-// Gestion des agences
-router.get('/agences', adminController.getAgences);
-router.get('/users/agencies', adminController.getAgences); // Alias pour compatibilité
-
-// Routes du scheduler
-router.use('/scheduler', schedulerRoutes);
+// ==========================================
+// AUTRES ROUTES ADMIN (À ajouter selon les besoins)
+// ==========================================
+// router.use('/reports', require('./admin/admin.reports.routes'));
+// router.use('/settings', require('./admin/admin.settings.routes'));
 
 module.exports = router;

@@ -7,8 +7,11 @@
     "dev": "nodemon src/app.js",
     "clean-admin": "node src/scripts/createCleanAdmin.js",
     "clean:db": "node src/scripts/cleanDatabase.js",
-    "agencies": "node src/scripts/createDefaultAgencies.js"
+    "agencies": "node src/scripts/createDefaultAgencies.js",
+    "fix-password": "node src/scripts/fix-password.js"  
   },
+
+  
   "keywords": [
     "express",
     "backend",

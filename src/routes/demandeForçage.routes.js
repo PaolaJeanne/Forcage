@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const demandeController = require('../controllers/demandeForçage.controller');
-const { uploadMultiple } = require('../middlewares/upload');
+const { uploadMultiple } = require('../middlewares/upload.middleware');
 const {
   authenticate,
   authorize,
@@ -18,9 +18,10 @@ const {
 // ==================== ROUTES SPÉCIALES (AVANT LES ROUTES PARAMÉTRÉES) ====================
 
 // Statistiques - DOIT ÊTRE AVANT /:id POUR ÉVITER LA CONFUSION
+// ✅ CORRIGÉ: Ajouter 'client' pour que les clients puissent voir leurs propres statistiques
 router.get('/statistics',
   authenticate,
-  authorize('admin', 'dga', 'rm', 'dce', 'conseiller'),
+  authorize('client', 'admin', 'dga', 'rm', 'dce', 'conseiller', 'adg', 'risques'),
   demandeController.getStatistiques
 );
 
@@ -32,10 +33,10 @@ router.get('/agency/demandes',
   demandeController.listerDemandes
 );
 
-// Toutes les demandes (DGA, Admin, Risques)
+// Toutes les demandes (DGA, Admin, Risques, RM, DCE, ADG, Conseiller)
 router.get('/all/demandes',
   authenticate,
-  requireAdmin,
+  authorize('admin', 'dga', 'risques', 'rm', 'dce', 'adg', 'conseiller'),
   listDemandesValidator,
   demandeController.listerDemandes
 );
